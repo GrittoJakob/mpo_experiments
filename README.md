@@ -11,4 +11,9 @@ Project folder for Team 09 in the course Advanced Deep Learning for Robotics at 
 To add dependencies: `uv add name-of-package`
 
 To run with jupyter notebook: `uv run --with jupyter jupyter lab`
+
+## Documentation for components
+
+MuJoCo XML: https://mujoco.readthedocs.io/en/latest/XMLreference.html
+
  
