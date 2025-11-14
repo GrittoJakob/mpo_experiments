@@ -1,0 +1,214 @@
+import os
+import time
+import random
+from dataclasses import dataclass
+import numpy as np
+import torch
+import gymnasium as gym
+from torch.utils.tensorboard import SummaryWriter
+import tyro
+import wandb
+from typing import Optional
+
+from mpo import MPO
+
+@dataclass
+class Args:
+
+    # ===============================
+    # General System & Environment
+    # ===============================
+    exp_name: str = "mpo_ant"
+    """the name of this experiment"""
+    device: str = "cpu"
+    """device used for training ('cpu' or 'cuda')"""
+    env_id: str = "Ant-v5"
+    """gym environment name (used in gym.make)"""
+    seed: int = 1
+    """seed of the experiment"""
+    track: bool = True
+    """if toggled, this experiment will be tracked with Weights and Biases"""
+    wandb_project_name: str = "MPO_Ant"
+    """the wandb's project name"""
+    wandb_entity: Optional[str] = "adl-robotics-project"
+    """the entity (team) of wandb's project"""
+    capture_video: bool = True
+    """whether to capture videos of the agent performances (check out `videos` folder)"""
+
+    # ===============================
+    # MPO Algorithm Parameters
+    # ===============================
+    iteration_num: int = 1000
+    """number of outer MPO iterations"""
+    log_dir: str = "mpo_logs"
+    """directory used for logs and model checkpoints"""
+
+    discount_factor: float = 0.99
+    """discount factor gamma, used in TD updates for the critic"""
+    dual_constraint: float = 0.1    
+    """ε for the dual optimization in the E-step"""
+    kl_mean_constraint: float = 0.1
+    """KL constraint on the mean in the M-step"""
+    kl_var_constraint: float = 0.0001
+    """KL constraint on the covariance in the M-step"""
+    q_loss_type: str = "mse"
+    """critic loss type, 'mse' or 'smoothl1'"""
+
+    alpha_mean_scale: float = 1.0
+    """learning rate (scaling factor) for mean Lagrange multiplier"""
+    alpha_var_scale: float = 100.0
+    """learning rate (scaling factor) for covariance Lagrange multiplier"""
+    alpha_mean_max: float = 0.1
+    """maximum clamp value for eta_mu"""
+    alpha_var_max: float = 10.0
+    """maximum clamp value for eta_sigma"""
+    mstep_iteration_num: int = 5
+    """number of gradient updates in the M-step"""
+
+    # ===============================
+    # Sampling / Replay Buffer
+    # ===============================
+
+    episode_rerun_num: int = 3
+    """how many passes over replay buffer per MPO iteration"""
+    sample_episode_num: int = 50
+    """number of episodes sampled per MPO iteration"""
+    sample_episode_maxstep: int = 300
+    """maximum number of steps per sampled episode"""
+    sample_action_num: int = 64
+    """number of action samples per state for E-step weighting"""
+    batch_size: int = 128
+    """batch size used when sampling from replay buffer"""
+
+    # ===============================
+    # Evaluation Parameters
+    # ===============================
+
+    evaluate_period: int = 10
+    """evaluate the agent every N iterations"""
+    evaluate_episode_num: int = 1
+    """how many evaluation episodes to run"""
+    evaluate_episode_maxstep: int = 300
+    """max steps per evaluation episode"""
+
+    # ===============================
+    # Logging / Checkpointing
+    # ===============================
+
+    render: bool = False
+    """render environment during sampling"""
+    load: Optional[str] = None
+    """optional checkpoint file to load before training"""
+    save_model: bool = False
+    """whether to save model into the `runs/{run_name}` folder"""
+    
+   
+def make_env(env_id, capture_video, run_name):
+    if capture_video:
+        env = gym.make(env_id, render_mode="rgb_array")
+        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+    else:
+        env = gym.make(env_id)
+
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.ClipAction(env)
+    return env
+   
+if __name__ == "__main__":
+    args = tyro.cli(Args)  # CLI aus der Dataclass
+
+    # Run-Name à la CleanRL
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+
+    # Logging-Verzeichnis
+    os.makedirs(args.log_dir, exist_ok=True)
+    tb_dir = os.path.join(args.log_dir, "tb", run_name)
+    writer = SummaryWriter(tb_dir)
+
+    # Hyperparameter-Text in TensorBoard
+    writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n" + "\n".join(
+            [f"|{key}|{value}|" for key, value in vars(args).items()]
+        ),
+    )
+
+    # Seeding (wie CleanRL)
+    #random.seed(args.seed)
+    #np.random.seed(args.seed)
+    #torch.manual_seed(args.seed)
+    #torch.backends.cudnn.deterministic = True
+
+    # Device
+    device = torch.device("cuda" if (args.device == "cuda" and torch.cuda.is_available()) else "cpu")
+    args.device = str(device)  # sicherstellen, dass MPO das gleiche sieht
+
+    # W&B
+    if args.track:
+        wandb.init(
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
+            sync_tensorboard=True,   # TensorBoard -> W&B
+            config=vars(args),
+            name=run_name,
+            monitor_gym=True,
+            save_code=True,
+        )
+
+    # Env erstellen (ein einzelnes Env für MPO)
+    env = make_env(args.env_id, args.capture_video, run_name)
+    assert isinstance(env.action_space, gym.spaces.Box)
+    #print(env.action_space.low, env.action_space.high)
+    # MPO initialisieren
+    model = MPO(env, args)   
+
+    if args.load is not None:
+        model.load_model(args.load)
+
+    all_logs = model.train(
+        iteration_num=args.iteration_num,
+        log_dir=os.path.join(args.log_dir, run_name),
+        render=args.render,
+    )
+
+    # Logs aus MPO in TB + W&B schreiben
+    for logs in all_logs:
+        it = logs["iteration"]
+
+        # Konsole (optional)
+        print(f"iteration: {it}")
+        print(f"  mean_return   : {logs['mean_return']:.3f}")
+        print(f"  mean_reward   : {logs['mean_reward']:.3f}")
+        print(f"  mean_loss_q        : {logs['mean_loss_q']:.3f}")
+        print(f"  mean_loss_p        : {logs['mean_loss_p']:.3f}")
+        print(f"  mean_loss_l        : {logs['mean_loss_l']:.3f}")
+        if "return_eval" in logs:
+            print(f"  return_eval      : {logs['return_eval']:.3f}")
+            print(f"  max_return_eval  : {logs['max_return_eval']:.3f}")
+
+        # TensorBoard
+        writer.add_scalar("train/mean_return", logs["mean_return"], it)
+        writer.add_scalar("train/mean_reward", logs["mean_reward"], it)
+        writer.add_scalar("train/loss_q",      logs["mean_loss_q"], it)
+        writer.add_scalar("train/loss_p",      logs["mean_loss_p"], it)
+        writer.add_scalar("train/loss_l",      logs["mean_loss_l"], it)
+        writer.add_scalar("train/mean_q",      logs["mean_q"], it)
+        writer.add_scalar("train/eta",         logs["eta"], it)
+        writer.add_scalar("train/max_kl_mu",   logs["max_kl_mu"], it)
+        writer.add_scalar("train/max_kl_sigma",logs["max_kl_sigma"], it)
+        writer.add_scalar("train/mean_sigma_det", logs["mean_sigma_det"], it)
+        writer.add_scalar("train/eta_mu",      logs["eta_mu"], it)
+        writer.add_scalar("train/eta_sigma",   logs["eta_sigma"], it)
+
+        if "return_eval" in logs:
+            writer.add_scalar("eval/return_eval",      logs["return_eval"], it)
+            writer.add_scalar("eval/max_return_eval",  logs["max_return_eval"], it)
+
+        # W&B direkt
+        if args.track:
+            wandb.log(logs, step=it)
+
+    writer.close()
+    if args.track:
+        wandb.finish()
+    env.close()

@@ -1,0 +1,15 @@
+2025-11-14 15:24:34,368 INFO    MainThread:1462056 [wandb_setup.py:_flush():80] Current SDK version is 0.23.0
+2025-11-14 15:24:34,368 INFO    MainThread:1462056 [wandb_setup.py:_flush():80] Configure stats pid to 1462056
+2025-11-14 15:24:34,368 INFO    MainThread:1462056 [wandb_setup.py:_flush():80] Loading settings from /home/jakob/.config/wandb/settings
+2025-11-14 15:24:34,368 INFO    MainThread:1462056 [wandb_setup.py:_flush():80] Loading settings from /home/jakob/ADLR_Project/tum-adlr-ws26-09/mpo_python3_10/wandb/settings
+2025-11-14 15:24:34,368 INFO    MainThread:1462056 [wandb_setup.py:_flush():80] Loading settings from environment variables
+2025-11-14 15:24:34,368 INFO    MainThread:1462056 [wandb_init.py:setup_run_log_directory():713] Logging user logs to /home/jakob/ADLR_Project/tum-adlr-ws26-09/mpo_python3_10/wandb/run-20251114_152434-n9tanb4x/logs/debug.log
+2025-11-14 15:24:34,369 INFO    MainThread:1462056 [wandb_init.py:setup_run_log_directory():714] Logging internal logs to /home/jakob/ADLR_Project/tum-adlr-ws26-09/mpo_python3_10/wandb/run-20251114_152434-n9tanb4x/logs/debug-internal.log
+2025-11-14 15:24:34,397 INFO    MainThread:1462056 [wandb_init.py:init():840] calling init triggers
+2025-11-14 15:24:34,397 INFO    MainThread:1462056 [wandb_init.py:init():845] wandb.init called with sweep_config: {}
+config: {'exp_name': 'mpo_ant', 'device': 'cpu', 'env_id': 'Ant-v5', 'seed': 1, 'track': True, 'wandb_project_name': 'MPO_Ant', 'wandb_entity': 'adl-robotics-project', 'capture_video': True, 'iteration_num': 4, 'log_dir': 'mpo_logs', 'discount_factor': 0.99, 'dual_constraint': 0.1, 'kl_mean_constraint': 0.1, 'kl_var_constraint': 0.0001, 'q_loss_type': 'mse', 'alpha_mean_scale': 1.0, 'alpha_var_scale': 100.0, 'alpha_mean_max': 0.1, 'alpha_var_max': 10.0, 'mstep_iteration_num': 5, 'episode_rerun_num': 5, 'sample_episode_num': 5, 'sample_episode_maxstep': 50, 'sample_action_num': 8, 'batch_size': 8, 'evaluate_period': 2, 'evaluate_episode_num': 1, 'evaluate_episode_maxstep': 300, 'render': False, 'load': None, 'save_model': False, '_wandb': {'code_path': 'code/mpo_python3_10/main.py'}}
+2025-11-14 15:24:34,397 INFO    MainThread:1462056 [wandb_init.py:init():888] starting backend
+2025-11-14 15:24:34,640 INFO    MainThread:1462056 [wandb_init.py:init():891] sending inform_init request
+2025-11-14 15:24:34,648 INFO    MainThread:1462056 [wandb_init.py:init():899] backend started and connected
+2025-11-14 15:24:34,665 INFO    MainThread:1462056 [wandb_init.py:init():969] updated telemetry
+2025-11-14 15:24:34,670 INFO    MainThread:1462056 [wandb_init.py:init():993] communicating run to backend with 90.0 second timeout
