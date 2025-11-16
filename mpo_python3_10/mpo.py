@@ -77,6 +77,7 @@ class MPO(object):
         self.evaluate_period = args.evaluate_period
         self.evaluate_episode_num = args.evaluate_episode_num
         self.evaluate_episode_maxstep = args.evaluate_episode_maxstep
+        self.learning_rate = args.learning_rate
 
         self.actor = Actor(env).to(self.device)
         self.critic = Critic(env).to(self.device)
@@ -90,8 +91,8 @@ class MPO(object):
             target_param.data.copy_(param.data)
             target_param.requires_grad = False
 
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=3e-4)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=3e-4)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),self.learning_rate)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), self.learning_rate)
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
 
         self.replaybuffer = ReplayBuffer()

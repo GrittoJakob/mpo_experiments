@@ -42,7 +42,6 @@ class Args:
     """number of outer MPO iterations"""
     log_dir: str = "mpo_logs"
     """directory used for logs and model checkpoints"""
-
     discount_factor: float = 0.99
     """discount factor gamma, used in TD updates for the critic"""
 
@@ -50,6 +49,21 @@ class Args:
     """maximum clamp value for eta_sigma"""
     mstep_iteration_num: int = 5
     """number of gradient updates in the M-step"""
+    learning_rate: float = 3e-4
+    """Learning rate for Adam optimizer"""
+    dual_constraint: float = 0.1
+    """hard constraint of the dual formulation in the E-step"""
+    kl_mean_constraint: float = 0.0005   
+    """hard constraint of the mean in the M-step"""
+    kl_var_constraint: float = 0.00001        
+    """hard constraint of the covariance in the M-step"""
+    alpha_mean_scale: float = 1.0              # alpha_mu_scale
+    alpha_var_scale: float = 100.0             # alpha_sigma_scale
+    alpha_scale: float = 10.0 
+    alpha_mean_max: float = 0.1                # eta_mu max
+    alpha_var_max: float = 10.0                # eta_sigma max
+    alpha_max: float = 10.0                    # falls genutzt
+    q_loss_type: str = 'mse'
 
     # ===============================
     # Sampling / Replay Buffer
@@ -65,6 +79,7 @@ class Args:
     """number of action samples per state for E-step weighting"""
     batch_size: int = 128
     """batch size used when sampling from replay buffer"""
+    
 
     # ===============================
     # Evaluation Parameters
