@@ -44,22 +44,8 @@ class Args:
     """directory used for logs and model checkpoints"""
 
     discount_factor: float = 0.99
-    """discount factor gamma, used in TD updates for the critic"""
-    dual_constraint: float = 0.1    
-    """ε for the dual optimization in the E-step"""
-    kl_mean_constraint: float = 0.1
-    """KL constraint on the mean in the M-step"""
-    kl_var_constraint: float = 0.0001
-    """KL constraint on the covariance in the M-step"""
-    q_loss_type: str = "mse"
-    """critic loss type, 'mse' or 'smoothl1'"""
+    """discount factor gamma, used in TD updates for the critic"""2
 
-    alpha_mean_scale: float = 1.0
-    """learning rate (scaling factor) for mean Lagrange multiplier"""
-    alpha_var_scale: float = 100.0
-    """learning rate (scaling factor) for covariance Lagrange multiplier"""
-    alpha_mean_max: float = 0.1
-    """maximum clamp value for eta_mu"""
     alpha_var_max: float = 10.0
     """maximum clamp value for eta_sigma"""
     mstep_iteration_num: int = 5
@@ -151,7 +137,7 @@ if __name__ == "__main__":
             sync_tensorboard=True,   # TensorBoard -> W&B
             config=vars(args),
             name=run_name,
-            monitor_gym=True,
+            monitor_gym=False,
             save_code=True,
         )
 
