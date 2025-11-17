@@ -78,11 +78,15 @@ class MPO(object):
         self.evaluate_episode_num = args.evaluate_episode_num
         self.evaluate_episode_maxstep = args.evaluate_episode_maxstep
         self.learning_rate = args.learning_rate
+        self.clear_replay_buffer = args.clear_replay_buffer
+        self.save_every = args.save_every
+        self.save_latest = args.save_latest
 
         self.actor = Actor(env).to(self.device)
         self.critic = Critic(env).to(self.device)
         self.target_actor = Actor(env).to(self.device)
         self.target_critic = Critic(env).to(self.device)
+        self.save_replay_buffer = args.save_replay_buffer
 
         for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
             target_param.data.copy_(param.data)
@@ -96,6 +100,10 @@ class MPO(object):
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
 
         self.replaybuffer = ReplayBuffer()
+        self.log_dir = args.log_dir
+        self.model_dir = os.path.join(self.log_dir, "model")
+        os.makedirs(self.model_dir, exist_ok=True)
+
 
         self.eta = np.random.rand()
         self.eta_mu = 0.0  # lagrangian multiplier for continuous action space in the M-step
@@ -133,19 +141,22 @@ class MPO(object):
         return buff
 
     def sample_trajectory(self, sample_episode_num):
-        self.replaybuffer.clear()
+        if self.clear_replay_buffer:
+            self.replaybuffer.clear()
+
+    
         episodes = [self.__sample_trajectory_worker(i)
                     for i in tqdm(range(sample_episode_num), desc='sample_trajectory')]
         self.replaybuffer.store_episodes(episodes)
  
-    def train(self, iteration_num=1000, log_dir='log', model_save_period=50, render=False):
+    def train(self, iteration_num=None, render=None):
 
         self.render = render
-
+        """
         model_save_dir = os.path.join(log_dir, 'model')
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
-
+        """
         all_logs = []
         #writer = SummaryWriter(os.path.join(log_dir, 'tb'))
 
@@ -290,9 +301,8 @@ class MPO(object):
             self.update_target_actor_critic()
 
             
-            self.save_model(it, os.path.join(model_save_dir, 'model_latest.pt'))
-            if it % model_save_period == 0:
-                self.save_model(it, os.path.join(model_save_dir, 'model_{}.pt'.format(it)))
+            self.save(it)
+         
 
         return all_logs
 
@@ -343,38 +353,90 @@ class MPO(object):
         self.target_actor.load_state_dict(checkpoint['target_actor_state_dict'])
         self.critic_optimizer.load_state_dict(checkpoint['critic_optim_state_dict'])
         self.actor_optimizer.load_state_dict(checkpoint['actor_optim_state_dict'])
+
+        # load Lagrange multipliers
+        self.eta = checkpoint["eta"]
+        self.eta_mu = checkpoint["eta_mu"]
+        self.eta_sigma = checkpoint["eta_sigma"]
+                
+        # replay buffer
+        if "replay_buffer" in checkpoint:
+            self.replaybuffer.load_state_dict(checkpoint["replay_buffer"])
+
         self.critic.train()
         self.target_critic.train()
         self.actor.train()
         self.target_actor.train()
 
-
-    def save_model(self, it, path=None):
+    def save_lightweight(self, path, iteration):
+        """Fast checkpoint: networks + optimizers only."""
         data = {
-            'iteration': it,
-            'actor_state_dict': self.actor.state_dict(),
-            'target_actor_state_dict': self.target_actor.state_dict(),
-            'critic_state_dict': self.critic.state_dict(),
-            'target_critic_state_dict': self.target_critic.state_dict(),
-            'actor_optim_state_dict': self.actor_optimizer.state_dict(),
-            'critic_optim_state_dict': self.critic_optimizer.state_dict()
+            "iteration": iteration,
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "target_actor": self.target_actor.state_dict(),
+            "target_critic": self.target_critic.state_dict(),
+            "actor_optim": self.actor_optimizer.state_dict(),
+            "critic_optim": self.critic_optimizer.state_dict(),
+
+            # Lagrange multipliers
+            "eta": self.eta,
+            "eta_mu": self.eta_mu,
+            "eta_sigma": self.eta_sigma
         }
         torch.save(data, path)
 
+    def save_full(self, path, iteration):
+        """Full checkpoint including replay buffer."""
+        data = {
+            "iteration": iteration,
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "target_actor": self.target_actor.state_dict(),
+            "target_critic": self.target_critic.state_dict(),
+            "actor_optim": self.actor_optimizer.state_dict(),
+            "critic_optim": self.critic_optimizer.state_dict(),
 
-    def evaluate(self):
-        with torch.no_grad():
-            total_rewards = []
-            for e in tqdm(range(self.evaluate_episode_num), desc='evaluating'):
-                total_reward = 0.0
-                state, info = self.env.reset()
-                for s in range(self.evaluate_episode_maxstep):
-                    action = self.actor.action(torch.as_tensor(state, dtype=torch.float32, device=self.device)).cpu().numpy()
-                    next_state, reward, terminated, truncated, info = self.env.step(action)
-                    done = terminated or truncated
-                    total_reward += reward
-                    if done:
-                        break
-                    state =  next_state
-                total_rewards.append(total_reward)
-            return np.mean(total_rewards)
+            # Lagrange multipliers
+            "eta": self.eta,
+            "eta_mu": self.eta_mu,
+            "eta_sigma": self.eta_sigma,
+
+            # Replay buffer
+            "replay_buffer": self.replaybuffer.state_dict()
+        }
+        torch.save(data, path)
+
+    def save(self, iteration):
+        """Main save function controlled by configuration."""
+        # 1) ALWAYS save a lightweight latest model
+        if self.save_latest:
+            self.save_lightweight(
+                os.path.join(self.model_dir, "model_latest.pt"),
+                iteration
+            )
+
+        # 2) EVERY N iterations save a full snapshot
+        if iteration % self.save_every == 0:
+            filename = f"model_{iteration}.pt"
+            if self.save_replay_buffer:
+                self.save_full(os.path.join(self.model_dir, filename), iteration)
+            else:
+                self.save_lightweight(os.path.join(self.model_dir, filename), iteration)
+
+        def evaluate(self):
+            with torch.no_grad():
+                total_rewards = []
+                for e in tqdm(range(self.evaluate_episode_num), desc='evaluating'):
+                    total_reward = 0.0
+                    state, info = self.env.reset()
+                    for s in range(self.evaluate_episode_maxstep):
+                        action = self.actor.action(torch.as_tensor(state, dtype=torch.float32, device=self.device)).cpu().numpy()
+                        next_state, reward, terminated, truncated, info = self.env.step(action)
+                        done = terminated or truncated
+                        total_reward += reward
+                        if done:
+                            break
+                        state =  next_state
+                    total_rewards.append(total_reward)
+                return np.mean(total_rewards)

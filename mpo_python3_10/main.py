@@ -57,13 +57,24 @@ class Args:
     """hard constraint of the mean in the M-step"""
     kl_var_constraint: float = 0.00001        
     """hard constraint of the covariance in the M-step"""
-    alpha_mean_scale: float = 1.0              # alpha_mu_scale
-    alpha_var_scale: float = 100.0             # alpha_sigma_scale
-    alpha_scale: float = 10.0 
-    alpha_mean_max: float = 0.1                # eta_mu max
-    alpha_var_max: float = 10.0                # eta_sigma max
-    alpha_max: float = 10.0                    # falls genutzt
+    alpha_mean_scale: float = 1.0
+    """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
+    alpha_var_scale: float = 100.0
+    """learning rate / scale factor for updating eta_sigma (variance KL Lagrange multiplier)"""
+    alpha_scale: float = 10.0
+    """generic scale factor for joint KL, used in some MPO variants (optional / fallback)"""
+    alpha_mean_max: float = 0.1
+    """maximum clamp value for eta_mu (mean KL Lagrange multiplier)"""
+    alpha_var_max: float = 10.0
+    """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
+    alpha_max: float = 10.0
+    """maximum clamp value for generic dual variables (if used together with alpha_scale)"""
     q_loss_type: str = 'mse'
+    """loss function type for the critic, e.g. 'mse' or 'huber'"""
+    clear_replay_buffer: bool = False
+    """if True: empty the replay buffer at every outer iteration (forces on-policy MPO behavior)"""
+    max_replay_buffer: int = 200000
+    """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
 
     # ===============================
     # Sampling / Replay Buffer
@@ -79,6 +90,8 @@ class Args:
     """number of action samples per state for E-step weighting"""
     batch_size: int = 128
     """batch size used when sampling from replay buffer"""
+    print_replay_buffer: bool = True
+    """Print shape and one episode from replay buffer for debugging"""
     
 
     # ===============================
@@ -100,9 +113,13 @@ class Args:
     """render environment during sampling"""
     load: Optional[str] = None
     """optional checkpoint file to load before training"""
-    save_model: bool = False
-    """whether to save model into the `runs/{run_name}` folder"""
-    
+    save_every: int = 3
+    """save full model every N MPO iterations"""
+    save_latest: bool = True
+    """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
+    save_replay_buffer: bool = True
+    """whether to include replay buffer in checkpoints (large files!)"""
+        
    
 def make_env(env_id, capture_video, run_name):
     if capture_video:
@@ -161,14 +178,17 @@ if __name__ == "__main__":
     assert isinstance(env.action_space, gym.spaces.Box)
     #print(env.action_space.low, env.action_space.high)
     # MPO initialisieren
-    model = MPO(env, args)   
+    Agent = MPO(env, args)   
 
     if args.load is not None:
-        model.load_model(args.load)
+        Agent.load_model(args.load)
 
-    all_logs = model.train(
+    if args.print_replay_buffer:
+        Agent.replaybuffer.debug_summary()
+        Agent.replaybuffer.print_episode(3,20)
+
+    all_logs = Agent.train(
         iteration_num=args.iteration_num,
-        log_dir=os.path.join(args.log_dir, run_name),
         render=args.render,
     )
 
@@ -213,3 +233,5 @@ if __name__ == "__main__":
     if args.track:
         wandb.finish()
     env.close()
+
+   
