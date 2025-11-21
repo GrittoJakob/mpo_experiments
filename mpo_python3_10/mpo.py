@@ -81,6 +81,7 @@ class MPO(object):
         self.clear_replay_buffer = args.clear_replay_buffer
         self.save_every = args.save_every
         self.save_latest = args.save_latest
+        self.wandb_track = args.track
 
         self.actor = Actor(env).to(self.device)
         self.critic = Critic(env).to(self.device)
@@ -112,55 +113,49 @@ class MPO(object):
         self.start_iteration = 1
         self.render = False
 
-
-    def __sample_trajectory_worker(self, i):
-        buff = []
-        state, info = self.env.reset()  # Gymnasium: reset() -> (obs, info)
-        for steps in range(self.sample_episode_maxstep):
-            if not np.isfinite(state).all():
-                print("⚠️ NaN/Inf in state:", state)
-                raise ValueError("State contains NaN/Inf before Actor!")
-            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-            #print(state.shape, state_tensor.shape)
-            action = self.target_actor.action(state_tensor).cpu().numpy()
-
-            next_state, reward, terminated, truncated, info = self.env.step(action)
-            done = terminated or truncated  # Gymnasium: done = terminated OR truncated
-
-            buff.append((state, action, next_state, reward))
-
-            if self.render and i == 0:
-                # bei Ant-v5: render_mode="human" schon beim gym.make(...) setzen
-                self.env.render()
-                sleep(0.01)
-
-            if done:
-                break
-            state = next_state
-
-        return buff
-
     def sample_trajectory(self, sample_episode_num):
         if self.clear_replay_buffer:
             self.replaybuffer.clear()
+        episodes = []
 
-    
-        episodes = [self.__sample_trajectory_worker(i)
-                    for i in tqdm(range(sample_episode_num), desc='sample_trajectory')]
+        for ep_idx in range(self.sample_episode_num):
+            buff = []
+            state, info = self.env.reset()
+
+            for steps in range(self.sample_episode_maxstep):
+                if not np.isfinite(state).all():
+                    print("⚠️ NaN/Inf in state:", state)
+                    raise ValueError("State contains NaN/Inf before Actor!")
+                state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+                #print(state.shape, state_tensor.shape)
+                action = self.target_actor.action(state_tensor).cpu().numpy()
+
+                next_state, reward, terminated, truncated, info = self.env.step(action)
+                done = terminated or truncated  # Gymnasium: done = terminated OR truncated
+
+                buff.append((state, action, next_state, reward))
+
+                if self.render and epd_idx == 0:
+                    # bei Ant-v5: render_mode="human" schon beim gym.make(...) setzen
+                    self.env.render()
+                    sleep(0.01)
+
+                if done:
+                    break
+                state = next_state
+
+            episodes.append(buff)
         self.replaybuffer.store_episodes(episodes)
- 
-    def train(self, iteration_num=None, render=None):
+
+
+    def train(self, iteration_num=None, render=None, log_callback =None):
 
         self.render = render
-        """
-        model_save_dir = os.path.join(log_dir, 'model')
-        if not os.path.exists(model_save_dir):
-            os.makedirs(model_save_dir)
-        """
+    
         all_logs = []
         #writer = SummaryWriter(os.path.join(log_dir, 'tb'))
 
-        for it in range(self.start_iteration, iteration_num + 1):
+        for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations") :
             self.sample_trajectory(self.sample_episode_num)
             buffer_size = len(self.replaybuffer)
 
@@ -295,7 +290,7 @@ class MPO(object):
                     "eta_sigma": self.eta_sigma,
                 }
 
-                # optional: Evaluate
+                  # optional: Evaluate
                 if it % self.evaluate_period == 0:
                     self.actor.eval()
                     return_eval = self.evaluate()
@@ -304,12 +299,12 @@ class MPO(object):
                     logs["return_eval"] = return_eval
                     logs["max_return_eval"] = self.max_return_eval
 
-                all_logs.append(logs)
+                if self.wandb_track is True and log_callback is not None:
+                    log_callback(logs)
 
             
+                all_logs.append(logs)
                 self.update_target_actor_critic()
-
-                
                 self.save(it)
             
 
