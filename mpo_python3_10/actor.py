@@ -15,9 +15,9 @@ class Actor(nn.Module):
 
         self.backbone = nn.Sequential(
             nn.Linear(self.ds, 256),
-            nn.ReLU(),
+            nn.ELU(),
             nn.Linear(256, 256),
-            nn.ReLU(),
+            nn.ELU(),
         )
 
         # zwei getrennte Köpfe
@@ -47,7 +47,7 @@ class Actor(nn.Module):
         x = self.backbone(state)   # (B, 256)
         
         #Mean Kopf
-        mean = torch.tanh(self.mean_layer(x))   # (B, da)
+        mean = self.mean_layer(x)   # (B, da)
         #mean = action_low + (action_high - action_low) * mean
 
         # Debug

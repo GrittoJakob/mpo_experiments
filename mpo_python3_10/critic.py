@@ -14,11 +14,11 @@ class Critic(nn.Module):
         self.da = env.action_space.shape[0]
 
         self.net = nn.Sequential(
-            nn.Linear(self.ds + self.da, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1)
+            nn.Linear(self.ds + self.da, 512),
+            nn.ELU(),
+            nn.Linear(512, 512),
+            nn.ELU(),
+            nn.Linear(512, 1)
         )
    
     def forward(self, state, action):

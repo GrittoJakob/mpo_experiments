@@ -72,7 +72,7 @@ class MPO(object):
         self.sample_episode_maxstep = args.sample_episode_maxstep
         self.sample_action_num = args.sample_action_num
         self.batch_size = args.batch_size
-        self.episode_rerun_num = args.episode_rerun_num
+        self.num_updates_per_iter = args.num_updates_per_iter
         self.mstep_iteration_num = args.mstep_iteration_num
         self.evaluate_period = args.evaluate_period
         self.evaluate_episode_num = args.evaluate_episode_num
@@ -175,12 +175,21 @@ class MPO(object):
             max_kl = []
             mean_sigma_det = []
 
-            for r in range(self.episode_rerun_num):
-                for indices in tqdm(
-                        BatchSampler(SubsetRandomSampler(range(buffer_size)), self.batch_size, drop_last=True),
-                        desc='training {}/{}'.format(r+1, self.episode_rerun_num)):
+            if buffer_size < self.batch_size:
+
+                print(f"[MPO] Buffer warmup: {buffer_size} < batch_size={self.batch_size}, skip updates")
+
+            else:
+
+                for r in range(self.num_updates_per_iter):
+                    
+                    indices = np.random.choice(
+                        buffer_size,
+                        size=self.batch_size,
+                        replace=False  # oder True, wenn du sehr viele Updates machen willst
+                    )
                         
-                    K = len(indices)  # the sample number of states
+                    K = len(self.batch_size)  # the sample number of states
                     N = self.sample_action_num  # the sample number of actions per state
 
                     state_batch, action_batch, next_state_batch, reward_batch = zip(
@@ -236,11 +245,11 @@ class MPO(object):
                         pi_1 = MultivariateNormal(loc=mu, scale_tril=b_A)  # (K,)
                         pi_2 = MultivariateNormal(loc=b_mu, scale_tril=A)  # (K,)
                         loss_p = torch.mean(
-                             norm_target_q * (
-                                 pi_1.expand((N, K)).log_prob(sampled_actions)  # (N, K)
-                                 + pi_2.expand((N, K)).log_prob(sampled_actions)  # (N, K)
-                             )
-                         )
+                            norm_target_q * (
+                                pi_1.expand((N, K)).log_prob(sampled_actions)  # (N, K)
+                                + pi_2.expand((N, K)).log_prob(sampled_actions)  # (N, K)
+                            )
+                        )
                         C_mu, C_sigma, sigma_i_det, sigma_det = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
                         
                         mean_loss_p.append((-loss_p).item())
@@ -302,7 +311,7 @@ class MPO(object):
 
             
             self.save(it)
-         
+        
 
         return all_logs
 

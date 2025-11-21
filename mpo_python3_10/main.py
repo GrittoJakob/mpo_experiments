@@ -73,14 +73,14 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     clear_replay_buffer: bool = False
     """if True: empty the replay buffer at every outer iteration (forces on-policy MPO behavior)"""
-    max_replay_buffer: int = 200000
+    max_replay_buffer: int = 2000000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
 
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
 
-    episode_rerun_num: int = 3
+    num_updates_per_iter: int = 3
     """how many passes over replay buffer per MPO iteration"""
     sample_episode_num: int = 50
     """number of episodes sampled per MPO iteration"""
@@ -90,7 +90,7 @@ class Args:
     """number of action samples per state for E-step weighting"""
     batch_size: int = 128
     """batch size used when sampling from replay buffer"""
-    print_replay_buffer: bool = True
+    print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
     
 
@@ -113,7 +113,7 @@ class Args:
     """render environment during sampling"""
     load: Optional[str] = None
     """optional checkpoint file to load before training"""
-    save_every: int = 3
+    save_every: int = 50
     """save full model every N MPO iterations"""
     save_latest: bool = True
     """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
