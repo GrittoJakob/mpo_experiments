@@ -189,7 +189,7 @@ class MPO(object):
                         replace=False  # oder True, wenn du sehr viele Updates machen willst
                     )
                         
-                    K = len(self.batch_size)  # the sample number of states
+                    K = self.batch_size  # the sample number of states
                     N = self.sample_action_num  # the sample number of actions per state
 
                     state_batch, action_batch, next_state_batch, reward_batch = zip(
@@ -271,47 +271,47 @@ class MPO(object):
                         clip_grad_norm_(self.actor.parameters(), 0.1)
                         self.actor_optimizer.step()                  
 
-            mean_loss_q = np.mean(mean_loss_q)
-            mean_loss_p = np.mean(mean_loss_p)
-            mean_loss_l = np.mean(mean_loss_l)
-            mean_est_q = np.mean(mean_est_q)
-            max_kl_mu = np.max(max_kl_mu)
-            max_kl_sigma = np.max(max_kl_sigma)
-            mean_sigma_det = np.mean(mean_sigma_det)
+                mean_loss_q = np.mean(mean_loss_q)
+                mean_loss_p = np.mean(mean_loss_p)
+                mean_loss_l = np.mean(mean_loss_l)
+                mean_est_q = np.mean(mean_est_q)
+                max_kl_mu = np.max(max_kl_mu)
+                max_kl_sigma = np.max(max_kl_sigma)
+                mean_sigma_det = np.mean(mean_sigma_det)
 
-            logs = {
-                "iteration": it,
-                "mean_return": mean_return,
-                "mean_reward": mean_reward,
-                "mean_loss_q": mean_loss_q,
-                "mean_loss_p": mean_loss_p,
-                "mean_loss_l": mean_loss_l,
-                "mean_q": mean_est_q,
-                "eta": self.eta,
-                "max_kl_mu": max_kl_mu,
-                "max_kl_sigma": max_kl_sigma,
-                "mean_sigma_det": mean_sigma_det,
-                "eta_mu": self.eta_mu,
-                "eta_sigma": self.eta_sigma,
-            }
+                logs = {
+                    "iteration": it,
+                    "mean_return": mean_return,
+                    "mean_reward": mean_reward,
+                    "mean_loss_q": mean_loss_q,
+                    "mean_loss_p": mean_loss_p,
+                    "mean_loss_l": mean_loss_l,
+                    "mean_q": mean_est_q,
+                    "eta": self.eta,
+                    "max_kl_mu": max_kl_mu,
+                    "max_kl_sigma": max_kl_sigma,
+                    "mean_sigma_det": mean_sigma_det,
+                    "eta_mu": self.eta_mu,
+                    "eta_sigma": self.eta_sigma,
+                }
 
-            # optional: Evaluate
-            if it % self.evaluate_period == 0:
-                self.actor.eval()
-                return_eval = self.evaluate()
-                self.actor.train()
-                self.max_return_eval = max(self.max_return_eval, return_eval)
-                logs["return_eval"] = return_eval
-                logs["max_return_eval"] = self.max_return_eval
+                # optional: Evaluate
+                if it % self.evaluate_period == 0:
+                    self.actor.eval()
+                    return_eval = self.evaluate()
+                    self.actor.train()
+                    self.max_return_eval = max(self.max_return_eval, return_eval)
+                    logs["return_eval"] = return_eval
+                    logs["max_return_eval"] = self.max_return_eval
 
-            all_logs.append(logs)
-
-        
-            self.update_target_actor_critic()
+                all_logs.append(logs)
 
             
-            self.save(it)
-        
+                self.update_target_actor_critic()
+
+                
+                self.save(it)
+            
 
         return all_logs
 
@@ -433,19 +433,19 @@ class MPO(object):
             else:
                 self.save_lightweight(os.path.join(self.model_dir, filename), iteration)
 
-        def evaluate(self):
-            with torch.no_grad():
-                total_rewards = []
-                for e in tqdm(range(self.evaluate_episode_num), desc='evaluating'):
-                    total_reward = 0.0
-                    state, info = self.env.reset()
-                    for s in range(self.evaluate_episode_maxstep):
-                        action = self.actor.action(torch.as_tensor(state, dtype=torch.float32, device=self.device)).cpu().numpy()
-                        next_state, reward, terminated, truncated, info = self.env.step(action)
-                        done = terminated or truncated
-                        total_reward += reward
-                        if done:
-                            break
-                        state =  next_state
-                    total_rewards.append(total_reward)
-                return np.mean(total_rewards)
+    def evaluate(self):
+        with torch.no_grad():
+            total_rewards = []
+            for e in tqdm(range(self.evaluate_episode_num), desc='evaluating'):
+                total_reward = 0.0
+                state, info = self.env.reset()
+                for s in range(self.evaluate_episode_maxstep):
+                    action = self.actor.action(torch.as_tensor(state, dtype=torch.float32, device=self.device)).cpu().numpy()
+                    next_state, reward, terminated, truncated, info = self.env.step(action)
+                    done = terminated or truncated
+                    total_reward += reward
+                    if done:
+                        break
+                    state =  next_state
+                total_rewards.append(total_reward)
+            return np.mean(total_rewards)

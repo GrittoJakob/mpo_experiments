@@ -183,15 +183,16 @@ if __name__ == "__main__":
     if args.load is not None:
         Agent.load_model(args.load)
 
-    if args.print_replay_buffer:
-        Agent.replaybuffer.debug_summary()
-        Agent.replaybuffer.print_episode(3,20)
 
     all_logs = Agent.train(
         iteration_num=args.iteration_num,
         render=args.render,
     )
-
+    
+    if args.print_replay_buffer:
+            Agent.replaybuffer.debug_summary()
+            Agent.replaybuffer.print_episode(3,20)
+            
     # Logs aus MPO in TB + W&B schreiben
     for logs in all_logs:
         it = logs["iteration"]
