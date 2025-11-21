@@ -354,14 +354,14 @@ class MPO(object):
 
     def load_model(self, path=None):
         load_path = path if path is not None else self.save_path
-        checkpoint = torch.load(load_path)
+        checkpoint = torch.load(load_path, weights_only = False)
         self.start_iteration = checkpoint['iteration'] + 1
-        self.critic.load_state_dict(checkpoint['critic_state_dict'])
-        self.target_critic.load_state_dict(checkpoint['target_critic_state_dict'])
-        self.actor.load_state_dict(checkpoint['actor_state_dict'])
-        self.target_actor.load_state_dict(checkpoint['target_actor_state_dict'])
-        self.critic_optimizer.load_state_dict(checkpoint['critic_optim_state_dict'])
-        self.actor_optimizer.load_state_dict(checkpoint['actor_optim_state_dict'])
+        self.critic.load_state_dict(checkpoint['critic'])
+        self.target_critic.load_state_dict(checkpoint['target_critic'])
+        self.actor.load_state_dict(checkpoint['actor'])
+        self.target_actor.load_state_dict(checkpoint['target_actor'])
+        self.critic_optimizer.load_state_dict(checkpoint['critic_optim'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optim'])
 
         # load Lagrange multipliers
         self.eta = checkpoint["eta"]
