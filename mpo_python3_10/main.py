@@ -80,7 +80,7 @@ class Args:
     # Sampling / Replay Buffer
     # ===============================
 
-    num_updates_per_iter: int = 3
+    num_updates_per_iter: int = 5
     """how many passes over replay buffer per MPO iteration"""
     sample_episode_num: int = 50
     """number of episodes sampled per MPO iteration"""
@@ -104,6 +104,8 @@ class Args:
     """how many evaluation episodes to run"""
     evaluate_episode_maxstep: int = 300
     """max steps per evaluation episode"""
+    target_update_period: int = 250
+    "number of Q-updates steps per new target init"
 
     # ===============================
     # Logging / Checkpointing

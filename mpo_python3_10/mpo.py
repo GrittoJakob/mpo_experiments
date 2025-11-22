@@ -13,6 +13,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from actor import Actor
 from critic import Critic
 from replaybuffer import ReplayBuffer
+import math
 
 
 def btr(m):
@@ -88,6 +89,11 @@ class MPO(object):
         self.target_actor = Actor(env).to(self.device)
         self.target_critic = Critic(env).to(self.device)
         self.save_replay_buffer = args.save_replay_buffer
+        self.q_update_step = 0
+        self.target_update_period = args.target_update_period
+        self.target_update_period_iters = max(
+            1, math.ceil(self.target_update_period / self.num_updates_per_iter)
+)
 
         for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
             target_param.data.copy_(param.data)
@@ -197,6 +203,7 @@ class MPO(object):
 
                     # Policy Evaluation
                     loss_q, q = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
+                    self.q_update_step += 1
                     mean_loss_q.append(loss_q.item())
                     mean_est_q.append(q.abs().mean().item())
 
@@ -304,7 +311,10 @@ class MPO(object):
 
             
                 all_logs.append(logs)
-                self.update_target_actor_critic()
+                if it % self.target_update_period_iters == 0:
+                    self.update_target_actor_critic()
+                    #print("Debug:Update Targets")
+                
                 self.save(it)
             
 
