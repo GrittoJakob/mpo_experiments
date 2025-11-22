@@ -84,7 +84,7 @@ class Args:
     """how many passes over replay buffer per MPO iteration"""
     sample_episode_num: int = 50
     """number of episodes sampled per MPO iteration"""
-    sample_episode_maxstep: int = 300
+    sample_episode_maxstep: int = 1000
     """maximum number of steps per sampled episode"""
     sample_action_num: int = 64
     """number of action samples per state for E-step weighting"""
@@ -113,7 +113,7 @@ class Args:
     """render environment during sampling"""
     load: Optional[str] = None
     """optional checkpoint file to load before training"""
-    save_every: int = 50
+    save_every: int = 100
     """save full model every N MPO iterations"""
     save_latest: bool = True
     """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
@@ -131,6 +131,31 @@ def make_env(env_id, capture_video, run_name):
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.ClipAction(env)
     return env
+
+def log_callback(logs):
+    it = logs["iteration"]
+
+    # TensorBoard
+    writer.add_scalar("mean_return", logs["mean_return"], it)
+    writer.add_scalar("mean_reward", logs["mean_reward"], it)
+    writer.add_scalar("loss_q",      logs["mean_loss_q"], it)
+    writer.add_scalar("loss_p",      logs["mean_loss_p"], it)
+    writer.add_scalar("loss_l",      logs["mean_loss_l"], it)
+    writer.add_scalar("mean_q",      logs["mean_q"], it)
+    writer.add_scalar("eta",         logs["eta"], it)
+    writer.add_scalar("max_kl_mu",   logs["max_kl_mu"], it)
+    writer.add_scalar("max_kl_sigma",logs["max_kl_sigma"], it)
+    writer.add_scalar("mean_sigma_det", logs["mean_sigma_det"], it)
+    writer.add_scalar("eta_mu",      logs["eta_mu"], it)
+    writer.add_scalar("eta_sigma",   logs["eta_sigma"], it)
+
+    if "return_eval" in logs:
+        writer.add_scalar("eval/return_eval",      logs["return_eval"], it)
+        writer.add_scalar("eval/max_return_eval",  logs["max_return_eval"], it)
+
+    # W&B
+    wandb.log(logs, step=it)
+    
    
 if __name__ == "__main__":
     args = tyro.cli(Args)  # CLI aus der Dataclass
@@ -166,7 +191,7 @@ if __name__ == "__main__":
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            sync_tensorboard=True,   # TensorBoard -> W&B
+            sync_tensorboard=False,   # TensorBoard -> W&B
             config=vars(args),
             name=run_name,
             monitor_gym=False,
@@ -187,12 +212,13 @@ if __name__ == "__main__":
     all_logs = Agent.train(
         iteration_num=args.iteration_num,
         render=args.render,
+        log_callback = log_callback
     )
     
     if args.print_replay_buffer:
             Agent.replaybuffer.debug_summary()
             Agent.replaybuffer.print_episode(3,20)
-            
+
     # Logs aus MPO in TB + W&B schreiben
     for logs in all_logs:
         it = logs["iteration"]
@@ -208,31 +234,9 @@ if __name__ == "__main__":
             print(f"  return_eval      : {logs['return_eval']:.3f}")
             print(f"  max_return_eval  : {logs['max_return_eval']:.3f}")
 
-        # TensorBoard
-        writer.add_scalar("train/mean_return", logs["mean_return"], it)
-        writer.add_scalar("train/mean_reward", logs["mean_reward"], it)
-        writer.add_scalar("train/loss_q",      logs["mean_loss_q"], it)
-        writer.add_scalar("train/loss_p",      logs["mean_loss_p"], it)
-        writer.add_scalar("train/loss_l",      logs["mean_loss_l"], it)
-        writer.add_scalar("train/mean_q",      logs["mean_q"], it)
-        writer.add_scalar("train/eta",         logs["eta"], it)
-        writer.add_scalar("train/max_kl_mu",   logs["max_kl_mu"], it)
-        writer.add_scalar("train/max_kl_sigma",logs["max_kl_sigma"], it)
-        writer.add_scalar("train/mean_sigma_det", logs["mean_sigma_det"], it)
-        writer.add_scalar("train/eta_mu",      logs["eta_mu"], it)
-        writer.add_scalar("train/eta_sigma",   logs["eta_sigma"], it)
-
-        if "return_eval" in logs:
-            writer.add_scalar("eval/return_eval",      logs["return_eval"], it)
-            writer.add_scalar("eval/max_return_eval",  logs["max_return_eval"], it)
-
-        # W&B direkt
-        if args.track:
-            wandb.log(logs, step=it)
 
     writer.close()
     if args.track:
         wandb.finish()
     env.close()
 
-   

@@ -149,7 +149,7 @@ class MPO(object):
 
 
     def train(self, iteration_num=None, render=None, log_callback =None):
-
+        print(f"[DEBUG] start_iteration = {self.start_iteration}, iteration_num = {iteration_num}")
         self.render = render
     
         all_logs = []
@@ -431,7 +431,7 @@ class MPO(object):
     def evaluate(self):
         with torch.no_grad():
             total_rewards = []
-            for e in tqdm(range(self.evaluate_episode_num), desc='evaluating'):
+            for e in range(self.evaluate_episode_num):
                 total_reward = 0.0
                 state, info = self.env.reset()
                 for s in range(self.evaluate_episode_maxstep):
