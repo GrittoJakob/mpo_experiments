@@ -45,8 +45,6 @@ class Args:
     discount_factor: float = 0.99
     """discount factor gamma, used in TD updates for the critic"""
 
-    alpha_var_max: float = 10.0
-    """maximum clamp value for eta_sigma"""
     mstep_iteration_num: int = 5
     """number of gradient updates in the M-step"""
     learning_rate: float = 3e-4
