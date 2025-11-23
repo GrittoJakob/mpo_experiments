@@ -107,6 +107,7 @@ class MPO(object):
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
 
         self.replaybuffer = ReplayBuffer()
+        #self.max_full_checkpoints = 1  
         self.log_dir = args.log_dir
         self.model_dir = os.path.join(self.log_dir, "model")
         os.makedirs(self.model_dir, exist_ok=True)
@@ -400,7 +401,7 @@ class MPO(object):
         }
         torch.save(data, path)
 
-    def save_full(self, path, iteration):
+    def save_full(self, path,iteration):
         """Full checkpoint including replay buffer."""
         data = {
             "iteration": iteration,
@@ -426,17 +427,20 @@ class MPO(object):
         # 1) ALWAYS save a lightweight latest model
         if self.save_latest:
             self.save_lightweight(
-                os.path.join(self.model_dir, "model_latest.pt"),
+                os.path.join(self.model_dir, "latest_model_without_rb.pt"),
                 iteration
             )
 
         # 2) EVERY N iterations save a full snapshot
         if iteration % self.save_every == 0:
-            filename = f"model_{iteration}.pt"
+            
             if self.save_replay_buffer:
-                self.save_full(os.path.join(self.model_dir, filename), iteration)
+                path = os.path.join(self.model_dir, "full_backup.pt")
+                if os.path.exists(path):
+                    os.remove(path)
+                self.save_full(path,iteration)
             else:
-                self.save_lightweight(os.path.join(self.model_dir, filename), iteration)
+                self.save_lightweight(os.path.join(self.model_dir, "latest_model_without_rb.pt"))
 
     def evaluate(self):
         with torch.no_grad():
