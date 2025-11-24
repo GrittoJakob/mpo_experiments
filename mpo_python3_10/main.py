@@ -34,12 +34,22 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    log_inner_interval: int = 25
+    "number of global updates per log to wandb"
 
     # ===============================
     # MPO Algorithm Parameters
     # ===============================
     iteration_num: int = 1000
     """number of outer MPO iterations"""
+    num_updates_per_iter: int = 5
+    """how many passes over replay buffer per MPO iteration"""
+    sample_action_num: int = 20
+    """number of action samples per state for E-step weighting"""
+    target_update_period: int = 200
+    "number of Q-updates steps per new target init"
+    update_dual_function_interval: int = 10
+    "Number of gradient updates per update on dual function"
     log_dir: str = "mpo_logs"
     """directory used for logs and model checkpoints"""
     discount_factor: float = 0.99
@@ -49,6 +59,8 @@ class Args:
     """number of gradient updates in the M-step"""
     learning_rate: float = 3e-4
     """Learning rate for Adam optimizer"""
+    eta_lr : float = 1e-2
+    "Learning rate for dual function"
     dual_constraint: float = 0.1
     """hard constraint of the dual formulation in the E-step"""
     kl_mean_constraint: float = 0.0005   
@@ -78,15 +90,11 @@ class Args:
     # Sampling / Replay Buffer
     # ===============================
 
-    num_updates_per_iter: int = 5
-    """how many passes over replay buffer per MPO iteration"""
-    sample_episode_num: int = 50
+    sample_episode_num: int = 20
     """number of episodes sampled per MPO iteration"""
     sample_episode_maxstep: int = 1000
     """maximum number of steps per sampled episode"""
-    sample_action_num: int = 64
-    """number of action samples per state for E-step weighting"""
-    batch_size: int = 128
+    batch_size: int = 1024
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
@@ -96,14 +104,12 @@ class Args:
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 10
+    evaluate_period: int = 50
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 1
+    evaluate_episode_num: int = 10
     """how many evaluation episodes to run"""
-    evaluate_episode_maxstep: int = 300
+    evaluate_episode_maxstep: int = 1000
     """max steps per evaluation episode"""
-    target_update_period: int = 250
-    "number of Q-updates steps per new target init"
 
     # ===============================
     # Logging / Checkpointing
@@ -133,28 +139,33 @@ def make_env(env_id, capture_video, run_name):
     return env
 
 def log_callback(logs):
-    it = logs["global_update"]
 
-    # TensorBoard
-    writer.add_scalar("mean_return_buffer", logs["mean_return_buffer"], it)
-    writer.add_scalar("mean_reward_buffer", logs["mean_reward_buffer"], it)
-    writer.add_scalar("loss_q",      logs["mean_loss_q"], it)
-    writer.add_scalar("loss_p",      logs["mean_loss_p"], it)
-    writer.add_scalar("loss_l",      logs["mean_loss_l"], it)
-    writer.add_scalar("mean_q",      logs["mean_q"], it)
-    writer.add_scalar("eta",         logs["eta"], it)
-    writer.add_scalar("max_kl_mu",   logs["max_kl_mu"], it)
-    writer.add_scalar("max_kl_sigma",logs["max_kl_sigma"], it)
-    writer.add_scalar("mean_sigma_det", logs["mean_sigma_det"], it)
-    writer.add_scalar("eta_mu",      logs["eta_mu"], it)
-    writer.add_scalar("eta_sigma",   logs["eta_sigma"], it)
+    global_update = logs["global_update"]
 
-    if "return_eval" in logs:
-        writer.add_scalar("eval/return_eval",      logs["return_eval"], it)
-        writer.add_scalar("eval/max_return_eval",  logs["max_return_eval"], it)
+    # --- TensorBoard ---
+    for key in [
+        "iteration"
+        "mean_return_buffer",
+        "mean_reward_buffer",
+        "mean_loss_q",
+        "mean_loss_p",
+        "mean_loss_l",
+        "mean_q",
+        "eta",
+        "max_kl_mu",
+        "max_kl_sigma",
+        "mean_sigma_det",
+        "eta_mu",
+        "eta_sigma",
+        "return_eval",
+        "max_return_eval",
+    ]:
+        if key in logs:
+            tag = key.replace("_", "/") if key.startswith("eval_") else key
+            writer.add_scalar(tag, logs[key], global_update)
 
-    # W&B
-    wandb.log(logs, step=it)
+    # --- W&B ---
+    wandb.log(logs, step=global_update)
     
    
 if __name__ == "__main__":

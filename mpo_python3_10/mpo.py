@@ -79,6 +79,7 @@ class MPO(object):
         self.evaluate_episode_num = args.evaluate_episode_num
         self.evaluate_episode_maxstep = args.evaluate_episode_maxstep
         self.learning_rate = args.learning_rate
+        self.eta_lr = args.eta_lr
         self.clear_replay_buffer = args.clear_replay_buffer
         self.save_every = args.save_every
         self.save_latest = args.save_latest
@@ -119,6 +120,8 @@ class MPO(object):
         self.max_return_eval = -np.inf
         self.start_iteration = 1
         self.render = False
+        self.update_dual_function_interval = args.update_dual_function_interval
+        self.log_inner_interval = args.log_inner_interval 
 
         self.mean_loss_q = []
         self.mean_loss_p = []
@@ -174,7 +177,9 @@ class MPO(object):
         for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations") :
             self.sample_trajectory(self.sample_episode_num)
             buffer_size = len(self.replaybuffer)
-           
+
+            mean_reward_buffer = self.replaybuffer.mean_reward()
+            mean_return_buffer = self.replaybuffer.mean_return()
 
             if buffer_size < self.batch_size:
 
@@ -219,18 +224,15 @@ class MPO(object):
                         ).reshape(N, K)
                         target_q_np = target_q.cpu().transpose(0, 1).numpy()  # (K, N)
                         
-                    def dual(eta):
-                        ## paper version
-                        #return eta * self.eps_daul + eta * np.mean(np.log(np.mean(np.exp(target_q_np / eta), axis=1)))
-
-                        ## stabilization version: move out max Q(s, a) to avoid overflow
-                        max_q = np.max(target_q_np, 1)
-                        return eta * self.eps_daul + np.mean(max_q) \
-                            + eta * np.mean(np.log(np.mean(np.exp((target_q_np - max_q[:, None]) / eta), axis=1)))
                     
-                    res = minimize(dual, np.array([self.eta]), method='SLSQP', bounds=[(1e-6, None)])
-                    self.eta = res.x[0]
-
+                    if r % self.update_dual_function_interval == 0:  
+                        eta_tensor = torch.tensor(self.eta, device=self.device, requires_grad=True)
+                        dual_val = self.dual_function(eta_tensor, target_q.detach(), self.eps_daul)
+                        dual_val.backward()
+                        with torch.no_grad():
+                            eta_tensor -= self.eta_lr * eta_tensor.grad
+                            eta_tensor.clamp_(min=1e-6)
+                            self.eta = eta_tensor.item()
                     # normalize
                     norm_target_q = torch.softmax(target_q / self.eta, dim=0)  # (N, K) or (action_dim, K)
 
@@ -273,14 +275,11 @@ class MPO(object):
                         clip_grad_norm_(self.actor.parameters(), 0.1)
                         self.actor_optimizer.step() 
 
-                    if r % self.target_update_period == 0:
+                    if global_update % self.target_update_period == 0:
                         self.update_target_actor_critic()
                     #print("Debug:Update Targets")
 
-                    if r % self.evaluate_period == 0:
-
-                        mean_reward_buffer = self.replaybuffer.mean_reward()
-                        mean_return_buffer = self.replaybuffer.mean_return()
+                    if r % self.log_inner_interval == 0:
 
                         logs = {
                             "global_update": global_update,
@@ -298,18 +297,28 @@ class MPO(object):
                             "eta_sigma": self.eta_sigma,
                         }
                         
-                        self.actor.eval()
-                        return_eval = self.evaluate()
-                        self.actor.train()
-                        self.max_return_eval = max(self.max_return_eval, return_eval)
-                        logs["return_eval"] = return_eval
-                        logs["max_return_eval"] = self.max_return_eval
-                        
                         if self.wandb_track is True and log_callback is not None:
                             log_callback(logs)
                         self.reset_logs()
-                        global_update += 1
+                        
+                    global_update += 1
                 
+                #Evalutation in outer loop
+                if it % self.evaluate_period == 0:
+                    self.actor.eval()
+                    return_eval = self.evaluate()
+                    self.actor.train()
+                    logs = {
+                        "global_update": global_update,
+                        "iteration": it,
+                        "mean_return_buffer": mean_return_buffer,
+                        "mean_reward_buffer": mean_reward_buffer,
+                        "return_eval": return_eval,
+                        "max_return_eval": self.max_return_eval,
+                        }
+                    if log_callback is not None:
+                        log_callback(logs)
+                    
                 self.save(it)
             
 
@@ -350,6 +359,31 @@ class MPO(object):
         # param(target_critic) <-- param(critic)
         for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
+    
+    def dual_function(self, eta, target_q, eps_daul):
+        """
+        eta: scalar Tensor, requires_grad=True
+        target_q: Tensor shape (N, K)
+        eps_dual: float (epsilon aus Paper)
+        """
+        tq = target_q.transpose(0, 1)          # (K, N)
+
+        
+        max_q, _ = tq.max(dim=1, keepdim=True)  # (K, 1)
+
+       
+        exp_term = torch.exp((tq - max_q) / eta)       # (K, N)
+
+      
+        inner_mean = exp_term.mean(dim=1)              # (K,)
+        log_term = torch.log(inner_mean)               # (K,)
+        
+        dual_value = (
+            eta * eps_daul
+            + max_q.squeeze(1).mean()                  # mean der max_q über K
+            + eta * log_term.mean()
+        )
+        return dual_value
 
 
     def load_model(self, path=None):
