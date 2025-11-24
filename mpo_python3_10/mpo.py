@@ -353,7 +353,9 @@ class MPO(object):
 
     def load_model(self, path=None):
         load_path = path if path is not None else self.save_path
-        checkpoint = torch.load(load_path, weights_only = False)
+        with torch.serialization.safe_globals([np.core.multiarray.scalar]):
+            checkpoint = torch.load(load_path, weights_only=False)
+  
         self.start_iteration = checkpoint['iteration'] + 1
         self.critic.load_state_dict(checkpoint['critic'])
         self.target_critic.load_state_dict(checkpoint['target_critic'])
@@ -413,7 +415,9 @@ class MPO(object):
             # Replay buffer
             "replay_buffer": self.replaybuffer.state_dict()
         }
-        torch.save(data, path)
+        tmp = path + ".tmp"
+        torch.save(data, tmp)
+        os.replace(tmp, path)
 
     def save(self, iteration):
         """Main save function controlled by configuration."""
