@@ -167,7 +167,7 @@ class MPO(object):
     def train(self, iteration_num=None, render=None, log_callback =None):
         print(f"[DEBUG] start_iteration = {self.start_iteration}, iteration_num = {iteration_num}")
         self.render = render
-    
+        global_update = 1
         all_logs = []
         #writer = SummaryWriter(os.path.join(log_dir, 'tb'))
 
@@ -283,7 +283,7 @@ class MPO(object):
                         mean_return_buffer = self.replaybuffer.mean_return()
 
                         logs = {
-                            "iteration": it,
+                            "global_update": global_update,
                             "mean_return_buffer": mean_return_buffer,
                             "mean_reward_buffer": mean_reward_buffer,
                             "mean_loss_q": np.mean(self.mean_loss_q),
@@ -308,6 +308,7 @@ class MPO(object):
                         if self.wandb_track is True and log_callback is not None:
                             log_callback(logs)
                         self.reset_logs()
+                        global_update += 1
                 
                 self.save(it)
             
@@ -457,9 +458,6 @@ class MPO(object):
             return np.mean(total_rewards)
 
     def reset_logs(self):
-
-        mean_reward_buffer = self.replaybuffer.mean_reward()
-        mean_return_buffer = self.replaybuffer.mean_return()
       
         self.mean_loss_q.clear()
         self.mean_loss_p.clear()

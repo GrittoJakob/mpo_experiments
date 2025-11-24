@@ -133,7 +133,7 @@ def make_env(env_id, capture_video, run_name):
     return env
 
 def log_callback(logs):
-    it = logs["iteration"]
+    it = logs["global_update"]
 
     # TensorBoard
     writer.add_scalar("mean_return_buffer", logs["mean_return_buffer"], it)
