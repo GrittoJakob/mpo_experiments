@@ -104,7 +104,7 @@ class Args:
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 50
+    evaluate_period: int = 1
     """evaluate the agent every N iterations"""
     evaluate_episode_num: int = 10
     """how many evaluation episodes to run"""
