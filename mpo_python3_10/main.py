@@ -136,8 +136,8 @@ def log_callback(logs):
     it = logs["iteration"]
 
     # TensorBoard
-    writer.add_scalar("mean_return", logs["mean_return"], it)
-    writer.add_scalar("mean_reward", logs["mean_reward"], it)
+    writer.add_scalar("mean_return_buffer", logs["mean_return_buffer"], it)
+    writer.add_scalar("mean_reward_buffer", logs["mean_reward_buffer"], it)
     writer.add_scalar("loss_q",      logs["mean_loss_q"], it)
     writer.add_scalar("loss_p",      logs["mean_loss_p"], it)
     writer.add_scalar("loss_l",      logs["mean_loss_l"], it)

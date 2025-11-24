@@ -120,6 +120,15 @@ class MPO(object):
         self.start_iteration = 1
         self.render = False
 
+        self.mean_loss_q = []
+        self.mean_loss_p = []
+        self.mean_loss_l = []
+        self.mean_est_q = []
+        self.max_kl_mu = []
+        self.max_kl_sigma = []
+        self.mean_sigma_det = []
+        self.max_kl = []
+
     def sample_trajectory(self, sample_episode_num):
         if self.clear_replay_buffer:
             self.replaybuffer.clear()
@@ -165,19 +174,7 @@ class MPO(object):
         for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations") :
             self.sample_trajectory(self.sample_episode_num)
             buffer_size = len(self.replaybuffer)
-
-            mean_reward_buffer = self.replaybuffer.mean_reward()
-            mean_return_buffer = self.replaybuffer.mean_return()
-            mean_reward = []
-            mean_return = []
-            mean_loss_q = []
-            mean_loss_p = []
-            mean_loss_l = []
-            mean_est_q = []
-            max_kl_mu = []
-            max_kl_sigma = []
-            max_kl = []
-            mean_sigma_det = []
+           
 
             if buffer_size < self.batch_size:
 
@@ -207,8 +204,8 @@ class MPO(object):
                     # Policy Evaluation
                     loss_q, q = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
                     self.q_update_step += 1
-                    mean_loss_q.append(loss_q.item())
-                    mean_est_q.append(q.abs().mean().item())
+                    self.mean_loss_q.append(loss_q.item())
+                    self.mean_est_q.append(q.abs().mean().item())
 
                     # E-Step of Policy Improvement
                     with torch.no_grad():
@@ -249,7 +246,7 @@ class MPO(object):
                         # paper2 version normalize
                         pi_1 = MultivariateNormal(loc=mu, scale_tril=b_A)  # (K,)
                         pi_2 = MultivariateNormal(loc=b_mu, scale_tril=A)  # (K,)
-                        loss_p = torch.mean(
+                        self.loss_p = torch.mean(
                             norm_target_q * (
                                 pi_1.expand((N, K)).log_prob(sampled_actions)  # (N, K)
                                 + pi_2.expand((N, K)).log_prob(sampled_actions)  # (N, K)
@@ -257,10 +254,10 @@ class MPO(object):
                         )
                         C_mu, C_sigma, sigma_i_det, sigma_det = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
                         
-                        mean_loss_p.append((-loss_p).item())
-                        max_kl_mu.append(C_mu.item())
-                        max_kl_sigma.append(C_sigma.item())
-                        mean_sigma_det.append(sigma_det.item())
+                        self.mean_loss_p.append((-self.loss_p).item())
+                        self.max_kl_mu.append(C_mu.item())
+                        self.max_kl_sigma.append(C_sigma.item())
+                        self.mean_sigma_det.append(sigma_det.item())
 
                         # Update lagrange multipliers by gradient descent
                         self.eta_mu -= self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
@@ -270,9 +267,9 @@ class MPO(object):
                         self.eta_sigma = np.clip(self.eta_sigma, 0.0, self.alpha_sigma_max)
 
                         self.actor_optimizer.zero_grad()
-                        loss_l = -( loss_p + self.eta_mu * (self.eps_mu - C_mu) + self.eta_sigma * (self.eps_gamma - C_sigma))
-                        mean_loss_l.append(loss_l.item())
-                        loss_l.backward()
+                        self.loss_l = -( self.loss_p + self.eta_mu * (self.eps_mu - C_mu) + self.eta_sigma * (self.eps_gamma - C_sigma))
+                        self.mean_loss_l.append(self.loss_l.item())
+                        self.loss_l.backward()
                         clip_grad_norm_(self.actor.parameters(), 0.1)
                         self.actor_optimizer.step() 
 
@@ -281,27 +278,22 @@ class MPO(object):
                     #print("Debug:Update Targets")
 
                     if r % self.evaluate_period == 0:
-                        
-                        mean_loss_q = np.mean(mean_loss_q)
-                        mean_loss_p = np.mean(mean_loss_p)
-                        mean_loss_l = np.mean(mean_loss_l)
-                        mean_est_q = np.mean(mean_est_q)
-                        max_kl_mu = np.max(max_kl_mu)
-                        max_kl_sigma = np.max(max_kl_sigma)
-                        mean_sigma_det = np.mean(mean_sigma_det)
+
+                        mean_reward_buffer = self.replaybuffer.mean_reward()
+                        mean_return_buffer = self.replaybuffer.mean_return()
 
                         logs = {
                             "iteration": it,
                             "mean_return_buffer": mean_return_buffer,
                             "mean_reward_buffer": mean_reward_buffer,
-                            "mean_loss_q": mean_loss_q,
-                            "mean_loss_p": mean_loss_p,
-                            "mean_loss_l": mean_loss_l,
-                            "mean_q": mean_est_q,
+                            "mean_loss_q": np.mean(self.mean_loss_q),
+                            "mean_loss_p": np.mean(self.mean_loss_p),
+                            "mean_loss_l": np.mean(self.mean_loss_l),
+                            "mean_q": np.mean(self.mean_est_q),
                             "eta": self.eta,
-                            "max_kl_mu": max_kl_mu,
-                            "max_kl_sigma": max_kl_sigma,
-                            "mean_sigma_det": mean_sigma_det,
+                            "max_kl_mu": np.mean(self.max_kl_mu),
+                            "max_kl_sigma": np.mean(self.max_kl_sigma),
+                            "mean_sigma_det": np.mean(self.mean_sigma_det),
                             "eta_mu": self.eta_mu,
                             "eta_sigma": self.eta_sigma,
                         }
@@ -464,13 +456,11 @@ class MPO(object):
 
         mean_reward_buffer = self.replaybuffer.mean_reward()
         mean_return_buffer = self.replaybuffer.mean_return()
-        mean_reward = []
-        mean_return = []
-        mean_loss_q = []
-        mean_loss_p = []
-        mean_loss_l = []
-        mean_est_q = []
-        max_kl_mu = []
-        max_kl_sigma = []
-        max_kl = []
-        mean_sigma_det = []
+      
+        self.mean_loss_q.clear()
+        self.mean_loss_p.clear()
+        self.mean_loss_l.clear()
+        self.mean_est_q.clear()
+        self.max_kl_mu.clear()
+        self.max_kl_sigma.clear()
+        self.mean_sigma_det.clear()
