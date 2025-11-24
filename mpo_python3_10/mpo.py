@@ -91,9 +91,10 @@ class MPO(object):
         self.save_replay_buffer = args.save_replay_buffer
         self.q_update_step = 0
         self.target_update_period = args.target_update_period
-        self.target_update_period_iters = max(
-            1, math.ceil(self.target_update_period / self.num_updates_per_iter)
-)
+        #self.log_interval_inner = args.log_interval_inner
+        #self.target_update_period_iters = max(
+        #    1, math.ceil(self.target_update_period / self.num_updates_per_iter)
+
 
         for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
             target_param.data.copy_(param.data)
@@ -107,7 +108,6 @@ class MPO(object):
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
 
         self.replaybuffer = ReplayBuffer()
-        #self.max_full_checkpoints = 1  
         self.log_dir = args.log_dir
         self.model_dir = os.path.join(self.log_dir, "model")
         os.makedirs(self.model_dir, exist_ok=True)
@@ -166,8 +166,10 @@ class MPO(object):
             self.sample_trajectory(self.sample_episode_num)
             buffer_size = len(self.replaybuffer)
 
-            mean_reward = self.replaybuffer.mean_reward()
-            mean_return = self.replaybuffer.mean_return()
+            mean_reward_buffer = self.replaybuffer.mean_reward()
+            mean_return_buffer = self.replaybuffer.mean_return()
+            mean_reward = []
+            mean_return = []
             mean_loss_q = []
             mean_loss_p = []
             mean_loss_l = []
@@ -272,49 +274,48 @@ class MPO(object):
                         mean_loss_l.append(loss_l.item())
                         loss_l.backward()
                         clip_grad_norm_(self.actor.parameters(), 0.1)
-                        self.actor_optimizer.step()                  
+                        self.actor_optimizer.step() 
 
-                mean_loss_q = np.mean(mean_loss_q)
-                mean_loss_p = np.mean(mean_loss_p)
-                mean_loss_l = np.mean(mean_loss_l)
-                mean_est_q = np.mean(mean_est_q)
-                max_kl_mu = np.max(max_kl_mu)
-                max_kl_sigma = np.max(max_kl_sigma)
-                mean_sigma_det = np.mean(mean_sigma_det)
-
-                logs = {
-                    "iteration": it,
-                    "mean_return": mean_return,
-                    "mean_reward": mean_reward,
-                    "mean_loss_q": mean_loss_q,
-                    "mean_loss_p": mean_loss_p,
-                    "mean_loss_l": mean_loss_l,
-                    "mean_q": mean_est_q,
-                    "eta": self.eta,
-                    "max_kl_mu": max_kl_mu,
-                    "max_kl_sigma": max_kl_sigma,
-                    "mean_sigma_det": mean_sigma_det,
-                    "eta_mu": self.eta_mu,
-                    "eta_sigma": self.eta_sigma,
-                }
-
-                  # optional: Evaluate
-                if it % self.evaluate_period == 0:
-                    self.actor.eval()
-                    return_eval = self.evaluate()
-                    self.actor.train()
-                    self.max_return_eval = max(self.max_return_eval, return_eval)
-                    logs["return_eval"] = return_eval
-                    logs["max_return_eval"] = self.max_return_eval
-
-                if self.wandb_track is True and log_callback is not None:
-                    log_callback(logs)
-
-            
-                all_logs.append(logs)
-                if it % self.target_update_period_iters == 0:
-                    self.update_target_actor_critic()
+                    if r % self.target_update_period == 0:
+                        self.update_target_actor_critic()
                     #print("Debug:Update Targets")
+
+                    if r % self.evaluate_period == 0:
+                        
+                        mean_loss_q = np.mean(mean_loss_q)
+                        mean_loss_p = np.mean(mean_loss_p)
+                        mean_loss_l = np.mean(mean_loss_l)
+                        mean_est_q = np.mean(mean_est_q)
+                        max_kl_mu = np.max(max_kl_mu)
+                        max_kl_sigma = np.max(max_kl_sigma)
+                        mean_sigma_det = np.mean(mean_sigma_det)
+
+                        logs = {
+                            "iteration": it,
+                            "mean_return_buffer": mean_return_buffer,
+                            "mean_reward_buffer": mean_reward_buffer,
+                            "mean_loss_q": mean_loss_q,
+                            "mean_loss_p": mean_loss_p,
+                            "mean_loss_l": mean_loss_l,
+                            "mean_q": mean_est_q,
+                            "eta": self.eta,
+                            "max_kl_mu": max_kl_mu,
+                            "max_kl_sigma": max_kl_sigma,
+                            "mean_sigma_det": mean_sigma_det,
+                            "eta_mu": self.eta_mu,
+                            "eta_sigma": self.eta_sigma,
+                        }
+                        
+                        self.actor.eval()
+                        return_eval = self.evaluate()
+                        self.actor.train()
+                        self.max_return_eval = max(self.max_return_eval, return_eval)
+                        logs["return_eval"] = return_eval
+                        logs["max_return_eval"] = self.max_return_eval
+                        
+                        if self.wandb_track is True and log_callback is not None:
+                            log_callback(logs)
+                        self.reset_logs()
                 
                 self.save(it)
             
@@ -458,3 +459,18 @@ class MPO(object):
                     state =  next_state
                 total_rewards.append(total_reward)
             return np.mean(total_rewards)
+
+    def reset_logs(self):
+
+        mean_reward_buffer = self.replaybuffer.mean_reward()
+        mean_return_buffer = self.replaybuffer.mean_return()
+        mean_reward = []
+        mean_return = []
+        mean_loss_q = []
+        mean_loss_p = []
+        mean_loss_l = []
+        mean_est_q = []
+        max_kl_mu = []
+        max_kl_sigma = []
+        max_kl = []
+        mean_sigma_det = []
