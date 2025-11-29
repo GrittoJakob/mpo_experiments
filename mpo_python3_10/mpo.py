@@ -85,17 +85,14 @@ class MPO(object):
         self.save_latest = args.save_latest
         self.wandb_track = args.track
 
-        self.actor = Actor(env).to(self.device)
-        self.critic = Critic(env).to(self.device)
-        self.target_actor = Actor(env).to(self.device)
-        self.target_critic = Critic(env).to(self.device)
+        self.actor = Actor(env, args.hidden_size_actor).to(self.device)
+        self.critic = Critic(env, args.hidden_size_critic).to(self.device)
+        self.target_actor = Actor(env,args.hidden_size_actor).to(self.device)
+        self.target_critic = Critic(env,args.hidden_size_critic).to(self.device)
         self.save_replay_buffer = args.save_replay_buffer
         self.q_update_step = 0
         self.target_update_period = args.target_update_period
-        #self.log_interval_inner = args.log_interval_inner
-        #self.target_update_period_iters = max(
-        #    1, math.ceil(self.target_update_period / self.num_updates_per_iter)
-
+    
 
         for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
             target_param.data.copy_(param.data)

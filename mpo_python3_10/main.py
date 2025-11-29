@@ -54,6 +54,10 @@ class Args:
     """directory used for logs and model checkpoints"""
     discount_factor: float = 0.99
     """discount factor gamma, used in TD updates for the critic"""
+    hidden_size_actor: int = 256
+    """hidden size of actor network"""
+    hidden_size_critic: int = 512
+    """hidden size of critc network"""
 
     mstep_iteration_num: int = 5
     """number of gradient updates in the M-step"""

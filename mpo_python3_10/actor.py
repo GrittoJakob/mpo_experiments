@@ -7,16 +7,17 @@ class Actor(nn.Module):
     
     #Policy network
     
-    def __init__(self, env):
+    def __init__(self, env, hidden_size_actor):
         super(Actor, self).__init__()
         self.env = env
         self.ds = env.observation_space.shape[0]
         self.da = env.action_space.shape[0]
+        self.hs= hidden_size_actor
 
         self.backbone = nn.Sequential(
-            nn.Linear(self.ds, 256),
+            nn.Linear(self.ds, self.hs),
             nn.ELU(),
-            nn.Linear(256, 256),
+            nn.Linear(self.hs, self.hs),
             nn.ELU(),
         )
 
