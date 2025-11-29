@@ -32,7 +32,7 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_inner_interval: int = 25
     "number of global updates per log to wandb"
