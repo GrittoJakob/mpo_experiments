@@ -24,20 +24,21 @@ def bt(m):
 
 def gaussian_kl(mu_i, mu, Ai, A):
     """
-    decoupled KL between two multivariate gaussian distribution
-    C_mu = KL(f(x|mu_i,sigma_i)||f(x|mu,sigma_i))
-    C_sigma = KL(f(x|mu_i,sigma_i)||f(x|mu_i,sigma))
-    :param mu_i: (B, n)
-    :param mu: (B, n)
-    :param Ai: (B, n, n)
-    :param A: (B, n, n)
-    :return: C_mu, C_sigma: scalar
-        mean and covariance terms of the KL
-    :return: mean of determinanats of sigma_i, sigma
+       Computes KL for multivariate Gaussians with Cholesky factors Ai (old) and A (new).
+    Returns:
+      - C_mu:    mean KL for mean
+      - C_sigma: mean KL for covariance
+      - sigma_i_det: mean determinant of old cov
+      - sigma_det: mean determinant of new cov
+      - var_mean: mean diagonal variance of Σ
+      - var_min:  minimum diagonal variance
+      - var_max:  maximum diagonal variancen: mean of determinanats of sigma_i, sigma
+
     """
     n = A.size(-1)
     mu_i = mu_i.unsqueeze(-1)  # (B, n, 1)
     mu = mu.unsqueeze(-1)  # (B, n, 1)
+
     sigma_i = Ai @ bt(Ai)  # (B, n, n)
     sigma = A @ bt(A)  # (B, n, n)
     sigma_i_det = sigma_i.det()  # (B,)
@@ -51,7 +52,14 @@ def gaussian_kl(mu_i, mu, Ai, A):
     inner_sigma = torch.log(sigma_det / sigma_i_det) - n + btr(sigma_inv @ sigma_i)  # (B,)
     C_mu = 0.5 * torch.mean(inner_mu)
     C_sigma = 0.5 * torch.mean(inner_sigma)
-    return C_mu, C_sigma, torch.mean(sigma_i_det), torch.mean(sigma_det)
+    
+    var_diag = torch.diagonal(sigma, dim1=-2, dim2=-1)  # (B,n)
+    var_mean = var_diag.mean()         # Mean 
+    var_min  = var_diag.min()          # Minimal variance
+    var_max  = var_diag.max()          # maximum variance
+    return C_mu, C_sigma, torch.mean(sigma_i_det), torch.mean(sigma_det), var_mean, var_min, var_max
+        
+     
 
 class MPO(object):
     def __init__(self, env, args):
@@ -114,6 +122,7 @@ class MPO(object):
         self.eta = np.random.rand()
         self.eta_mu = 0.0  # lagrangian multiplier for continuous action space in the M-step
         self.eta_sigma = 0.0  # lagrangian multiplier for continuous action space in the M-step
+        self.num_steps = 0
         self.max_return_eval = -np.inf
         self.start_iteration = 1
         self.render = False
@@ -128,6 +137,9 @@ class MPO(object):
         self.max_kl_sigma = []
         self.mean_sigma_det = []
         self.max_kl = []
+        self.var_mean = []
+        self.var_min = []
+        self.var_max = []
 
     def sample_trajectory(self, sample_episode_num):
         if self.clear_replay_buffer:
@@ -251,12 +263,15 @@ class MPO(object):
                                 + pi_2.expand((N, K)).log_prob(sampled_actions)  # (N, K)
                             )
                         )
-                        C_mu, C_sigma, sigma_i_det, sigma_det = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
+                        C_mu, C_sigma, sigma_i_det, sigma_det,var_mean, var_min, var_max  = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
                         
                         self.mean_loss_p.append((-self.loss_p).item())
                         self.max_kl_mu.append(C_mu.item())
                         self.max_kl_sigma.append(C_sigma.item())
                         self.mean_sigma_det.append(sigma_det.item())
+                        self.var_mean.append(var_mean.item())
+                        self.var_min.append(var_min.item())
+                        self.var_max.append(var_max.item())
 
                         # Update lagrange multipliers by gradient descent
                         self.eta_mu -= self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
@@ -277,8 +292,11 @@ class MPO(object):
                     #print("Debug:Update Targets")
 
                     if r % self.log_inner_interval == 0:
-
+                        
+                        self.num_steps = it * self.sample_episode_num* self.sample_episode_maxstep
+                        
                         logs = {
+                            "num_steps": self.num_steps,
                             "global_update": global_update,
                             "mean_return_buffer": mean_return_buffer,
                             "mean_reward_buffer": mean_reward_buffer,
@@ -292,6 +310,9 @@ class MPO(object):
                             "mean_sigma_det": np.mean(self.mean_sigma_det),
                             "eta_mu": self.eta_mu,
                             "eta_sigma": self.eta_sigma,
+                            "var_mean": np.mean(self.var_mean),
+                            "var_min": np.mean(self.var_min),
+                            "var_max": np.mean(self.var_max)
                         }
                         
                         if self.wandb_track is True and log_callback is not None:
@@ -305,13 +326,14 @@ class MPO(object):
                     self.actor.eval()
                     return_eval = self.evaluate()
                     self.actor.train()
+                    self.num_steps = it * self.sample_episode_num * self.sample_episode_maxstep
                     logs = {
+                        "num_steps": self.num_steps,
                         "global_update": global_update,
                         "iteration": it,
                         "mean_return_buffer": mean_return_buffer,
                         "mean_reward_buffer": mean_reward_buffer,
                         "return_eval": return_eval,
-                        "max_return_eval": self.max_return_eval,
                         }
                     if log_callback is not None:
                         log_callback(logs)
@@ -364,14 +386,8 @@ class MPO(object):
         eps_dual: float (epsilon aus Paper)
         """
         tq = target_q.transpose(0, 1)          # (K, N)
-
-        
         max_q, _ = tq.max(dim=1, keepdim=True)  # (K, 1)
-
-       
         exp_term = torch.exp((tq - max_q) / eta)       # (K, N)
-
-      
         inner_mean = exp_term.mean(dim=1)              # (K,)
         log_term = torch.log(inner_mean)               # (K,)
         

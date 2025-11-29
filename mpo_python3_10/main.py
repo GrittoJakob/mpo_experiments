@@ -148,7 +148,9 @@ def log_callback(logs):
 
     # --- TensorBoard ---
     for key in [
-        "iteration"
+        "iteration",
+        "num_steps",
+        "global_update",
         "mean_return_buffer",
         "mean_reward_buffer",
         "mean_loss_q",
@@ -162,7 +164,9 @@ def log_callback(logs):
         "eta_mu",
         "eta_sigma",
         "return_eval",
-        "max_return_eval",
+        "var_mean",
+        "var_min",
+        "var_max"
     ]:
         if key in logs:
             tag = key.replace("_", "/") if key.startswith("eval_") else key
@@ -233,22 +237,6 @@ if __name__ == "__main__":
     if args.print_replay_buffer:
             Agent.replaybuffer.debug_summary()
             Agent.replaybuffer.print_episode(3,20)
-
-    # Logs aus MPO in TB + W&B schreiben
-    for logs in all_logs:
-        it = logs["iteration"]
-
-        # Konsole (optional)
-        print(f"iteration: {it}")
-        print(f"  mean_return   : {logs['mean_return']:.3f}")
-        print(f"  mean_reward   : {logs['mean_reward']:.3f}")
-        print(f"  mean_loss_q        : {logs['mean_loss_q']:.3f}")
-        print(f"  mean_loss_p        : {logs['mean_loss_p']:.3f}")
-        print(f"  mean_loss_l        : {logs['mean_loss_l']:.3f}")
-        if "return_eval" in logs:
-            print(f"  return_eval      : {logs['return_eval']:.3f}")
-            print(f"  max_return_eval  : {logs['max_return_eval']:.3f}")
-
 
     writer.close()
     if args.track:
