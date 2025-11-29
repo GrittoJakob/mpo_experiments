@@ -61,25 +61,25 @@ class Args:
 
     mstep_iteration_num: int = 5
     """number of gradient updates in the M-step"""
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     """Learning rate for Adam optimizer"""
     eta_lr : float = 1e-2
     "Learning rate for dual function"
     dual_constraint: float = 0.1
     """hard constraint of the dual formulation in the E-step"""
-    kl_mean_constraint: float = 0.0005   
+    kl_mean_constraint: float = 0.005   
     """hard constraint of the mean in the M-step"""
-    kl_var_constraint: float = 0.00001        
+    kl_var_constraint: float = 0.0001        
     """hard constraint of the covariance in the M-step"""
     alpha_mean_scale: float = 1.0
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
-    alpha_var_scale: float = 100.0
+    alpha_var_scale: float = 0.1
     """learning rate / scale factor for updating eta_sigma (variance KL Lagrange multiplier)"""
     alpha_scale: float = 10.0
     """generic scale factor for joint KL, used in some MPO variants (optional / fallback)"""
     alpha_mean_max: float = 0.1
     """maximum clamp value for eta_mu (mean KL Lagrange multiplier)"""
-    alpha_var_max: float = 10.0
+    alpha_var_max: float = 1.0
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
     alpha_max: float = 10.0
     """maximum clamp value for generic dual variables (if used together with alpha_scale)"""

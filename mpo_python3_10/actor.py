@@ -22,8 +22,8 @@ class Actor(nn.Module):
         )
 
         # zwei getrennte Köpfe
-        self.mean_layer = nn.Linear(256, self.da)
-        self.cholesky_layer = nn.Linear(256, (self.da * (self.da + 1)) // 2)
+        self.mean_layer = nn.Linear(self.hs, self.da)
+        self.cholesky_layer = nn.Linear(self.hs, (self.da * (self.da + 1)) // 2)
 
 
     def forward(self, state):
@@ -45,7 +45,7 @@ class Actor(nn.Module):
         #action_high = torch.from_numpy(self.env.action_space.high)[None, ...].to(device)  # (1, da)
         #action_low = torch.as_tensor(self.env.action_space.low, device=device, dtype=torch.float32).unsqueeze(0)
         #action_high = torch.as_tensor(self.env.action_space.high, device=device, dtype=torch.float32).unsqueeze(0)
-        x = self.backbone(state)   # (B, 256)
+        x = self.backbone(state)   # (B, hs)
         
         #Mean Kopf
         mean = self.mean_layer(x)   # (B, da)
