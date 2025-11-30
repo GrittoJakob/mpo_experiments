@@ -94,6 +94,7 @@ class MPO(object):
         self.wandb_track = args.track
         self.std_init = args.std_init
         self.use_tanh_mean = args.use_tanh_mean
+        self.use_retrace = args.use_retrace
 
         self.actor = Actor(env, args.hidden_size_actor, self.std_init, self.use_tanh_mean).to(self.device)
         self.critic = Critic(env, args.hidden_size_critic).to(self.device)
@@ -135,7 +136,8 @@ class MPO(object):
         self.mean_loss_q = []
         self.mean_loss_p = []
         self.mean_loss_l = []
-        self.mean_est_q = []
+        self.mean_current_q = []
+        self.mean_target_q = []
         self.max_kl_mu = []
         self.max_kl_sigma = []
         self.mean_sigma_det = []
@@ -219,11 +221,15 @@ class MPO(object):
                     reward_batch     = torch.as_tensor(np.stack(reward_batch), dtype=torch.float32, device=self.device)     #[K,]
 
                     # Policy Evaluation
-                    loss_q, q = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
+                    if self.use_retrace:
+                        loss_q, current_q, Q_target = self.critic_update_retrace(state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
+                    else:
+                        loss_q, current_q, Q_target = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
                     self.q_update_step += 1
                     self.mean_loss_q.append(loss_q.item())
-                    self.mean_est_q.append(q.abs().mean().item())
-
+                    self.mean_current_q.append(current_q.abs().mean().item())
+                    self.mean_target_q.append(Q_target.abs().mean().item())
+                    
                     # E-Step of Policy Improvement
                     with torch.no_grad():
                         # sample N actions per state
@@ -307,7 +313,8 @@ class MPO(object):
                             "mean_loss_q": np.mean(self.mean_loss_q),
                             "mean_loss_p": np.mean(self.mean_loss_p),
                             "mean_loss_l": np.mean(self.mean_loss_l),
-                            "mean_q": np.mean(self.mean_est_q),
+                            "mean_current_q": np.mean(self.mean_current_q),
+                            "mean_target_q": np.mean(self.mean_target_q),
                             "eta": self.eta,
                             "max_kl_mu": np.mean(self.max_kl_mu),
                             "max_kl_sigma": np.mean(self.max_kl_sigma),
@@ -371,7 +378,47 @@ class MPO(object):
         loss = self.norm_loss_q(y, t)
         loss.backward()
         self.critic_optimizer.step()
-        return loss, y
+        return loss, t, y
+
+
+    def critic_update_retrace(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):
+       
+        with torch.no_grad():
+
+            log_prob = self.actor.evaluate_action(state_batch, action_batch)
+            target_log_prob = self.target_actor.evaluate_action(state_batch, action_batch)
+
+            c_ret = self.calc_retrace_weights(target_log_prob, log_prob)
+
+            Q_target = self.target_critic(state_batch, action_batch).squeeze(-1)
+              # [B, N, act_dim]
+            sampled_actions = self.target_actor.sample_action(next_state_batch, sample_num=sample_num)  # [B, N, act_dim]
+            s_next_expanded = next_state_batch.unsqueeze(1).expand(-1, sample_num, -1)  # [B, N, obs_dim]
+            
+            flat_s = s_next_expanded.reshape(-1, next_state_batch.shape[-1])
+            flat_a = sampled_actions.reshape(-1, action_batch.shape[-1])
+            flat_q = self.target_critic.forward(flat_s, flat_a).squeeze(-1)  # [B*N]
+
+            q_values = flat_q.view(state_batch.shape[0], sample_num)  # [B, N]
+            expected_target_Q = q_values.mean(dim=1)  # [B]
+            
+            Q_ret = reward_batch + self.gamma * (expected_target_Q + c_ret * (expected_target_Q - Q_target))
+
+        current_Q = self.critic(state_batch, action_batch).squeeze(-1)  # [B]
+        
+        critic_loss = self.norm_loss_q(current_Q, Q_ret)
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        return critic_loss, current_Q, Q_ret
+
+    def calc_retrace_weights(self,target_policy_logprob, behaviour_policy_logprob):
+        
+        log_retrace_weights = (target_policy_logprob - behaviour_policy_logprob).clamp(max=0)
+        retrace_weights = log_retrace_weights.exp()
+        assert not torch.isnan(log_retrace_weights).any(), "Error, a least one NaN value found in retrace weights."
+        return retrace_weights
 
 
     def update_target_actor_critic(self):
@@ -513,7 +560,8 @@ class MPO(object):
         self.mean_loss_q.clear()
         self.mean_loss_p.clear()
         self.mean_loss_l.clear()
-        self.mean_est_q.clear()
+        self.mean_current_q = []
+        self.mean_target_q = []
         self.max_kl_mu.clear()
         self.max_kl_sigma.clear()
         self.mean_sigma_det.clear()

@@ -7,12 +7,14 @@ class Actor(nn.Module):
     
     #Policy network
     
-    def __init__(self, env, hidden_size_actor, std_init = 0.7, use_tanh_mean: bool = False):
+    def __init__(self, env, hidden_size_actor, std_init, use_tanh_mean: bool = False):
         super(Actor, self).__init__()
         self.env = env
         self.ds = env.observation_space.shape[0]
         self.da = env.action_space.shape[0]
         self.hs= hidden_size_actor
+        self.use_tanh_mean = use_tanh_mean
+        self._printed_init_cov = False
 
         self.backbone = nn.Sequential(
             nn.Linear(self.ds, self.hs),
@@ -29,9 +31,6 @@ class Actor(nn.Module):
             # all weiths to zero
             self.cholesky_layer.weight.zero_()
             self.cholesky_layer.bias.zero_()
-
-            # desired start std
-            std_init = 0.7
 
             # inverse Softplus:
             def softplus_inv(y):
@@ -68,7 +67,7 @@ class Actor(nn.Module):
         #Mean Kopf
         mean = self.mean_layer(x)   # (B, da)
         
-        if use_tanh:
+        if self.use_tanh_mean:
             mean = torch.tanh(mean)
 
 
@@ -106,8 +105,28 @@ class Actor(nn.Module):
         :return: an action
         """
         with torch.no_grad():
-            state_batched = state.unsqueeze(0)
+            state_batched = self.ensure_batched(state)
             mean, cholesky = self.forward(state_batched)
             action_distribution = MultivariateNormal(mean, scale_tril=cholesky)
             action = action_distribution.sample()
         return action[0]
+
+    def evaluate_action(self, state, action):
+        with torch.no_grad():
+            state_batched = self.ensure_batched(state)
+            action_batched = self.ensure_batched(action)
+            mean, cholesky = self.forward(state_batched)
+            action_distribution = MultivariateNormal(mean, scale_tril=cholesky)
+            log_prob = action_distribution.log_prob(action_batched)
+        return log_prob
+
+    def sample_action(self, state, sample_num):
+        with torch.no_grad():
+            state_batched = self.ensure_batched(state)
+            mean, cholesky = self.forward(state_batched)
+            dist = MultivariateNormal(mean, scale_tril=cholesky)
+            samples = dist.rsample((sample_num,)).permute(1, 0, 2)
+        return samples
+        
+    def ensure_batched(self,tensor):
+        return tensor if tensor.ndim == 2 else tensor.unsqueeze(0)

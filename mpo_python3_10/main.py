@@ -44,7 +44,7 @@ class Args:
     """number of outer MPO iterations"""
     num_updates_per_iter: int = 5
     """how many passes over replay buffer per MPO iteration"""
-    sample_action_num: int = 20
+    sample_action_num: int = 64
     """number of action samples per state for E-step weighting"""
     target_update_period: int = 200
     "number of Q-updates steps per new target init"
@@ -58,6 +58,8 @@ class Args:
     """hidden size of actor network"""
     hidden_size_critic: int = 512
     """hidden size of critc network"""
+    use_retrace: bool = True
+    """True for use of retrace, false for TD approach"""
 
     mstep_iteration_num: int = 5
     """number of gradient updates in the M-step"""
@@ -159,7 +161,8 @@ def log_callback(logs):
         "mean_loss_q",
         "mean_loss_p",
         "mean_loss_l",
-        "mean_q",
+        "mean_current_q",
+        "mean_target_q",
         "eta",
         "max_kl_mu",
         "max_kl_sigma",
