@@ -89,7 +89,10 @@ class Args:
     """if True: empty the replay buffer at every outer iteration (forces on-policy MPO behavior)"""
     max_replay_buffer: int = 2000000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
-
+    std_init: float = 0.7
+    """desired std for actor inialization on diagonal"""
+    use_tanh_mean: bool = False
+    """Flag to determine the use of the tanh after the mean layer"""
     # ===============================
     # Sampling / Replay Buffer
     # ===============================

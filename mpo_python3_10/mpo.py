@@ -92,14 +92,17 @@ class MPO(object):
         self.save_every = args.save_every
         self.save_latest = args.save_latest
         self.wandb_track = args.track
+        self.std_init = args.std_init
+        self.use_tanh_mean = args.use_tanh_mean
 
-        self.actor = Actor(env, args.hidden_size_actor).to(self.device)
+        self.actor = Actor(env, args.hidden_size_actor, self.std_init, self.use_tanh_mean).to(self.device)
         self.critic = Critic(env, args.hidden_size_critic).to(self.device)
-        self.target_actor = Actor(env,args.hidden_size_actor).to(self.device)
+        self.target_actor = Actor(env,args.hidden_size_actor, self.std_init, self.use_tanh_mean).to(self.device)
         self.target_critic = Critic(env,args.hidden_size_critic).to(self.device)
         self.save_replay_buffer = args.save_replay_buffer
         self.q_update_step = 0
         self.target_update_period = args.target_update_period
+        
     
 
         for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
@@ -274,7 +277,8 @@ class MPO(object):
                         self.var_max.append(var_max.item())
 
                         # Update lagrange multipliers by gradient descent
-                        self.eta_mu -= self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
+                    
+                        self.eta_mu = self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
                         self.eta_sigma -= self.alpha_sigma_scale * (self.eps_gamma - C_sigma).detach().item()
 
                         self.eta_mu = np.clip(self.eta_mu, 0.0, self.alpha_mu_max)

@@ -7,7 +7,7 @@ class Actor(nn.Module):
     
     #Policy network
     
-    def __init__(self, env, hidden_size_actor):
+    def __init__(self, env, hidden_size_actor, std_init = 0.7, use_tanh_mean: bool = False):
         super(Actor, self).__init__()
         self.env = env
         self.ds = env.observation_space.shape[0]
@@ -24,6 +24,24 @@ class Actor(nn.Module):
         # zwei getrennte Köpfe
         self.mean_layer = nn.Linear(self.hs, self.da)
         self.cholesky_layer = nn.Linear(self.hs, (self.da * (self.da + 1)) // 2)
+        
+        with torch.no_grad():
+            # all weiths to zero
+            self.cholesky_layer.weight.zero_()
+            self.cholesky_layer.bias.zero_()
+
+            # desired start std
+            std_init = 0.7
+
+            # inverse Softplus:
+            def softplus_inv(y):
+                return torch.log(torch.exp(torch.tensor(y)) - 1.0)
+
+            diag_indices = torch.arange(self.da, dtype=torch.long)
+            diag_indices = (diag_indices + 1) * (diag_indices + 2) // 2 - 1
+
+            # Bias so setzen, dass softplus(bias) = std_init
+            self.cholesky_layer.bias[diag_indices] = softplus_inv(std_init)
 
 
     def forward(self, state):
@@ -49,12 +67,9 @@ class Actor(nn.Module):
         
         #Mean Kopf
         mean = self.mean_layer(x)   # (B, da)
-        #mean = action_low + (action_high - action_low) * mean
-
-        # Debug
-        if torch.isnan(mean).any():
-            print("⚠️ NaN in Actor mean! state:", state)
-            raise ValueError("NaN in Actor mean")
+        
+        if use_tanh:
+            mean = torch.tanh(mean)
 
 
         # Cholesky-Kopf
@@ -69,6 +84,15 @@ class Actor(nn.Module):
         tril_indices = torch.tril_indices(row=da, col=da, offset=0, device=device)
         cholesky = torch.zeros(size=(B, da, da), dtype=torch.float32, device=device)
         cholesky[:, tril_indices[0], tril_indices[1]] = cholesky_vector
+
+        #Debug: Print variance
+        if not self._printed_init_cov:
+            with torch.no_grad():
+                Sigma = cholesky @ cholesky.transpose(-1, -2)   # Covariance
+                diag_vars = torch.diagonal(Sigma, dim1=-2, dim2=-1)[0]  # erste Batch-Zeile
+                print("🔍 Initial diagonal variances:", diag_vars.cpu().numpy())
+            self._printed_init_cov = True
+
         return mean, cholesky
     """
     def distribution(mean, cholesky):
