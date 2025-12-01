@@ -189,6 +189,9 @@ class MPO(object):
         env_runtime = 0
         train_runtime = 0
         eval_runtime = 0
+        runtime_policy_eval = 0
+        runtime_E_step = 0
+        runtime_M_step = 0
         #writer = SummaryWriter(os.path.join(log_dir, 'tb'))
 
         for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations") :
@@ -229,16 +232,21 @@ class MPO(object):
                     next_state_batch = torch.as_tensor(np.stack(next_state_batch), dtype=torch.float32, device=self.device) #[K, dim_obs]
                     reward_batch     = torch.as_tensor(np.stack(reward_batch), dtype=torch.float32, device=self.device)     #[K,]
 
+                    t_policy_eval_start = time.perf_counter()
                     # Policy Evaluation
                     if self.use_retrace:
                         loss_q, current_q, Q_target = self.critic_update_retrace(state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
                     else:
                         loss_q, current_q, Q_target = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
+
+                    t_policy_eval_end = time.perf_counter()    
+                    runtime_policy_eval += t_policy_eval_end - t_policy_eval_start
                     self.q_update_step += 1
                     self.mean_loss_q.append(loss_q.item())
                     self.mean_current_q.append(current_q.abs().mean().item())
                     self.mean_target_q.append(Q_target.abs().mean().item())
                     
+                    t_E_step_start = time.perf_counter()        #Timer
                     # E-Step of Policy Improvement
                     with torch.no_grad():
                         # sample N actions per state
@@ -263,6 +271,10 @@ class MPO(object):
                     # normalize
                     norm_target_q = torch.softmax(target_q / self.eta, dim=0)  # (N, K) or (action_dim, K)
 
+                    t_E_step_end = time.perf_counter()         #Counter
+                    runtime_E_step += t_E_step_end - t_E_step_start
+
+                    t_M_step_start = time.perf_counter() 
                     # M-Step of Policy Improvement
                     for _ in range(self.mstep_iteration_num):
                         mu, A = self.actor.forward(state_batch)
@@ -305,6 +317,9 @@ class MPO(object):
                         self.loss_l.backward()
                         clip_grad_norm_(self.actor.parameters(), 0.1)
                         self.actor_optimizer.step() 
+                    
+                    t_M_step_end = time.perf_counter()
+                    runtime_M_step += t_M_step_end - t_M_step_start
 
                     if global_update % self.target_update_period == 0:
                         self.update_target_actor_critic()
@@ -327,6 +342,9 @@ class MPO(object):
                             "runtime_train": train_runtime,
                             "runtime_env": env_runtime,
                             "runtime_eval": eval_runtime,
+                            "runtime_policy_eval": runtime_policy_eval,
+                            "runtime_M_step": runtime_M_step,
+                            "runtime_E_step": runtime_E_step,
                             "eta": self.eta,
                             "max_kl_mu": np.mean(self.max_kl_mu),
                             "max_kl_sigma": np.mean(self.max_kl_sigma),
@@ -344,8 +362,8 @@ class MPO(object):
                         
                     global_update += 1
 
-                    t_train_end = time.perf_counter()
-                    train_runtime += t_train_end - t_train_start
+                t_train_end = time.perf_counter()
+                train_runtime += t_train_end - t_train_start
                 
                 #Evalutation in outer loop
                 if it % self.evaluate_period == 0:
@@ -365,11 +383,11 @@ class MPO(object):
                         }
                     if log_callback is not None:
                         log_callback(logs)
-                    
-                self.save(it)
 
+                self.save(it)
                 t_eval_end = time.perf_counter()
-                eval_runtime += t_eval_end -t_eval_start
+                eval_runtime += t_eval_end -t_eval_start  
+                
             
 
         return all_logs
