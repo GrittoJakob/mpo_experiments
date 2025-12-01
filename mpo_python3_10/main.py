@@ -58,7 +58,7 @@ class Args:
     """hidden size of actor network"""
     hidden_size_critic: int = 512
     """hidden size of critc network"""
-    use_retrace: bool = True
+    use_retrace: bool = False
     """True for use of retrace, false for TD approach"""
 
     mstep_iteration_num: int = 5
@@ -170,7 +170,7 @@ def log_callback(logs):
         "eta_mu",
         "eta_sigma",
         "return_eval",
-        "var_mean",
+        "var_mean
         "var_min",
         "var_max"
     ]:

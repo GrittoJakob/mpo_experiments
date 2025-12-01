@@ -390,6 +390,11 @@ class MPO(object):
 
             c_ret = self.calc_retrace_weights(target_log_prob, log_prob)
 
+            with torch.no_grad():
+                print("🔍 c_ret stats — min:", c_ret.min().item(), 
+                    "max:", c_ret.max().item(), 
+                    "mean:", c_ret.mean().item())
+
             Q_target = self.target_critic(state_batch, action_batch).squeeze(-1)
               # [B, N, act_dim]
             sampled_actions = self.target_actor.sample_action(next_state_batch, sample_num=sample_num)  # [B, N, act_dim]
