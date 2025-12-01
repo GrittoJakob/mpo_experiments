@@ -18,7 +18,8 @@ class Actor(nn.Module):
 
         self.backbone = nn.Sequential(
             nn.Linear(self.ds, self.hs),
-            nn.ELU(),
+            nn.LayerNorm(self.hs),
+            nn.Tanh(),
             nn.Linear(self.hs, self.hs),
             nn.ELU(),
         )
@@ -127,6 +128,6 @@ class Actor(nn.Module):
             dist = MultivariateNormal(mean, scale_tril=cholesky)
             samples = dist.rsample((sample_num,)).permute(1, 0, 2)
         return samples
-        
+
     def ensure_batched(self,tensor):
         return tensor if tensor.ndim == 2 else tensor.unsqueeze(0)

@@ -16,7 +16,8 @@ class Critic(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(self.ds + self.da, self.hs),
-            nn.ELU(),
+            nn.LayerNorm(self.hs),
+            nn.Tanh(),
             nn.Linear(self.hs, self.hs),
             nn.ELU(),
             nn.Linear(self.hs, 1)

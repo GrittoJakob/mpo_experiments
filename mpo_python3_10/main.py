@@ -206,15 +206,26 @@ if __name__ == "__main__":
         ),
     )
 
-    # Seeding (wie CleanRL)
-    #random.seed(args.seed)
-    #np.random.seed(args.seed)
-    #torch.manual_seed(args.seed)
-    #torch.backends.cudnn.deterministic = True
-
-    # Device
+     # Device
     device = torch.device("cuda" if (args.device == "cuda" and torch.cuda.is_available()) else "cpu")
     args.device = str(device)  # sicherstellen, dass MPO das gleiche sieht
+
+    # Env erstellen (ein einzelnes Env für MPO)
+    env = make_env(args.env_id, args.capture_video, run_name)
+    assert isinstance(env.action_space, gym.spaces.Box)
+    
+
+    # Seeding 
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False    
+    env.reset(seed=args.seed)  
+
 
     # W&B
     if args.track:
@@ -228,10 +239,7 @@ if __name__ == "__main__":
             save_code=True,
         )
 
-    # Env erstellen (ein einzelnes Env für MPO)
-    env = make_env(args.env_id, args.capture_video, run_name)
-    assert isinstance(env.action_space, gym.spaces.Box)
-    #print(env.action_space.low, env.action_space.high)
+    
     # MPO initialisieren
     Agent = MPO(env, args)   
 
