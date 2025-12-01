@@ -13,7 +13,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from actor import Actor
 from critic import Critic
 from replaybuffer import ReplayBuffer
-import math
+import time
 
 
 def btr(m):
@@ -186,10 +186,19 @@ class MPO(object):
         self.render = render
         global_update = 1
         all_logs = []
+        env_runtime = 0
+        train_runtime = 0
+        eval_runtime = 0
         #writer = SummaryWriter(os.path.join(log_dir, 'tb'))
 
         for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations") :
+            
+            t_env_start = time.perf_counter()
             self.sample_trajectory(self.sample_episode_num)
+            t_env_end = time.perf_counter()
+            env_runtime += t_env_end - t_env_start
+
+            t_train_start = time.perf_counter()
             buffer_size = len(self.replaybuffer)
 
             mean_reward_buffer = self.replaybuffer.mean_reward()
@@ -315,6 +324,9 @@ class MPO(object):
                             "mean_loss_l": np.mean(self.mean_loss_l),
                             "mean_current_q": np.mean(self.mean_current_q),
                             "mean_target_q": np.mean(self.mean_target_q),
+                            "runtime_train": train_runtime,
+                            "runtime_env": env_runtime,
+                            "runtime_eval": eval_runtime,
                             "eta": self.eta,
                             "max_kl_mu": np.mean(self.max_kl_mu),
                             "max_kl_sigma": np.mean(self.max_kl_sigma),
@@ -331,9 +343,14 @@ class MPO(object):
                         self.reset_logs()
                         
                     global_update += 1
+
+                    t_train_end = time.perf_counter()
+                    train_runtime += t_train_end - t_train_start
                 
                 #Evalutation in outer loop
                 if it % self.evaluate_period == 0:
+
+                    t_eval_start = time.perf_counter()
                     self.actor.eval()
                     return_eval = self.evaluate()
                     self.actor.train()
@@ -350,6 +367,9 @@ class MPO(object):
                         log_callback(logs)
                     
                 self.save(it)
+
+                t_eval_end = time.perf_counter()
+                eval_runtime += t_eval_end -t_eval_start
             
 
         return all_logs
@@ -380,7 +400,7 @@ class MPO(object):
         self.critic_optimizer.step()
         return loss, t, y
 
-
+    ## Mistake: need to change buffer for storage of old policies!
     def critic_update_retrace(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):
        
         with torch.no_grad():

@@ -164,13 +164,16 @@ def log_callback(logs):
         "mean_current_q",
         "mean_target_q",
         "eta",
+        "runtime_train",
+        "runtime_env",
+        "runtime_eval",
         "max_kl_mu",
         "max_kl_sigma",
         "mean_sigma_det",
         "eta_mu",
         "eta_sigma",
         "return_eval",
-        "var_mean
+        "var_mean",
         "var_min",
         "var_max"
     ]:
