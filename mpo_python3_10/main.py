@@ -36,6 +36,8 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_inner_interval: int = 25
     "number of global updates per log to wandb"
+    num_threads: int = 16  
+    """number of threads to use"""
 
     # ===============================
     # MPO Algorithm Parameters
@@ -135,7 +137,18 @@ class Args:
     save_replay_buffer: bool = True
     """whether to include replay buffer in checkpoints (large files!)"""
         
+def limit_threads(n: int):
+    # PyTorch threads
+    torch.set_num_threads(n)
+    torch.set_num_interop_threads(1)
+
+    # NumPy / BLAS threads (muss vor Imports passieren, aber auch so meist ok)
+    os.environ["OMP_NUM_THREADS"] = str(n)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(n)
+    os.environ["MKL_NUM_THREADS"] = str(n)
+    os.environ["NUMEXPR_NUM_THREADS"] = str(n)
    
+
 def make_env(env_id, capture_video, run_name):
     if capture_video:
         env = gym.make(env_id, render_mode="rgb_array")
@@ -189,6 +202,7 @@ def log_callback(logs):
    
 if __name__ == "__main__":
     args = tyro.cli(Args)  # CLI aus der Dataclass
+    limit_threads(args.num_threads)
 
     # Run-Name à la CleanRL
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
