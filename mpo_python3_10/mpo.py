@@ -305,11 +305,11 @@ class MPO(object):
 
                         # Update lagrange multipliers by gradient descent
                     
-                        self.eta_mu = self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
+                        self.eta_mu -= self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
                         self.eta_sigma -= self.alpha_sigma_scale * (self.eps_gamma - C_sigma).detach().item()
 
-                        self.eta_mu = np.clip(self.eta_mu, 0.0, self.alpha_mu_max)
-                        self.eta_sigma = np.clip(self.eta_sigma, 0.0, self.alpha_sigma_max)
+                        self.eta_mu = np.clip(self.eta_mu, 1e-10, self.alpha_mu_max)
+                        self.eta_sigma = np.clip(self.eta_sigma, 1e-10, self.alpha_sigma_max)
 
                         self.actor_optimizer.zero_grad()
                         self.loss_l = -( self.loss_p + self.eta_mu * (self.eps_mu - C_mu) + self.eta_sigma * (self.eps_gamma - C_sigma))
