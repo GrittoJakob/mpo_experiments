@@ -60,253 +60,160 @@ def gaussian_kl(mu_i, mu, Ai, A):
     var_max  = var_diag.max()          # maximum variance
     return C_mu, C_sigma, torch.mean(sigma_i_det), torch.mean(sigma_det), var_mean, var_min, var_max
         
-     
-
 class MPO(object):
     def __init__(self, env, args):
+        """
+        Main class implementing the MPO agent.
+        Holds:
+        - environment reference
+        - actor / critic networks and their target networks
+        - replay buffer
+        - all hyperparameters and logging buffers
+        """
+        # 1) Environment & basic dimensions
         self.env = env
         self.state_dim = env.observation_space.shape[0]
         self.action_dim = env.action_space.shape[0]
 
+        # Device used for tensors / networks (CPU or GPU)
         self.device = args.device
-        self.eps_daul = args.dual_constraint
-        self.eps_mu = args.kl_mean_constraint
-        self.eps_gamma = args.kl_var_constraint
+
+        # MPO / optimization hyperparameters
+        # Dual / KL constraints
+        self.eps_dual = args.dual_constraint      # KL constraint for E-Step
+        self.eps_mu = args.kl_mean_constraint     # KL constraint for mean
+        self.eps_gamma = args.kl_var_constraint   # KL constraint for variance
+
+        # Discount factor for returns
         self.gamma = args.discount_factor
-        self.alpha_mu_scale = args.alpha_mean_scale # scale Largrangian multiplier
-        self.alpha_sigma_scale = args.alpha_var_scale  # scale Largrangian multiplier
+
+        # Lagrange multiplier step sizes (for KL constraints)
+        self.alpha_mu_scale = args.alpha_mean_scale     # scale for mean Lagrange multiplier update
+        self.alpha_sigma_scale = args.alpha_var_scale   # scale for variance Lagrange multiplier update
+
+        # Maximum values for Lagrange multipliers
         self.alpha_mu_max = args.alpha_mean_max
         self.alpha_sigma_max = args.alpha_var_max
 
-        self.sample_episode_num = args.sample_episode_num
-        self.sample_episode_maxstep = args.sample_episode_maxstep
-        self.sample_action_num = args.sample_action_num
-        self.batch_size = args.batch_size
-        self.UTD_ratio = args.UTD_ratio
-        self.mstep_iteration_num = args.mstep_iteration_num
-        self.evaluate_period = args.evaluate_period
-        self.evaluate_episode_num = args.evaluate_episode_num
-        self.evaluate_episode_maxstep = args.evaluate_episode_maxstep
-        self.learning_rate = args.learning_rate
+        # Temperature learning rate (for dual variable eta)
         self.eta_lr = args.eta_lr
+
+        # Main learning rate for actor/critic optimizers
+        self.learning_rate = args.learning_rate
+
+        # How often we update eta (dual function)
+        #self.update_dual_function_interval = args.update_dual_function_interval
+
+        # 3) Sampling / training schedule
+    
+        self.sample_episode_num = args.sample_episode_num    # Number of episodes to sample per iteration       
+        self.sample_episode_maxstep = args.sample_episode_maxstep   # Maximum steps per sampled episode
+        self.sample_action_num = args.sample_action_num  # Number of action samples per state in MPO E-step
+        self.batch_size = args.batch_size   # Minibatch size for training
+        self.UTD_ratio = args.UTD_ratio # Update-to-data ratio (how many updates per collected step)
+
+        # Number of M-step (actor) iterations per E-step
+        #self.mstep_iteration_num = args.mstep_iteration_num
+
+        # Number of steps to warm up the replay buffer before training
+        self.warm_up_steps = args.warm_up_steps
+
+        # Evaluation / logging / saving schedule
+        
+        self.evaluate_period = args.evaluate_period     # How often to run evaluation (in training iterations)
+        self.evaluate_episode_num = args.evaluate_episode_num    # Number of evaluation episodes
+        self.evaluate_episode_maxstep = args.evaluate_episode_maxstep   # Max steps per evaluation episode
+
+        # Logging behavior (e.g. WandB)
+        self.wandb_track = args.track
+        # Inner-loop logging interval (every N gradient updates)
+        self.log_inner_interval = args.log_inner_interval
+
+        # Model saving configuration
         self.save_every = args.save_every
         self.save_latest = args.save_latest
-        self.wandb_track = args.track
-        self.std_init = args.std_init
-        self.use_tanh_mean = args.use_tanh_mean
-        self.use_retrace = args.use_retrace
-        self.warm_up_steps = args.warm_up_steps
-        self.actor = Actor(env, args.hidden_size_actor, self.std_init, self.use_tanh_mean).to(self.device)
-        self.critic = Critic(env, args.hidden_size_critic).to(self.device)
-        self.target_actor = Actor(env,args.hidden_size_actor, self.std_init, self.use_tanh_mean).to(self.device)
-        self.target_critic = Critic(env,args.hidden_size_critic).to(self.device)
-        self.save_replay_buffer = args.save_replay_buffer
-        self.q_update_step = 0
-        self.target_update_period = args.target_update_period
-        
-    
-
-        for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
-            target_param.data.copy_(param.data)
-            target_param.requires_grad = False
-        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
-            target_param.data.copy_(param.data)
-            target_param.requires_grad = False
-
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),self.learning_rate)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), self.learning_rate)
-        self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
-
-        self.replaybuffer = ReplayBuffer()
         self.log_dir = args.log_dir
         self.model_dir = os.path.join(self.log_dir, "model")
         os.makedirs(self.model_dir, exist_ok=True)
 
+        # Policy / value networks and their targets
+        self.std_init = args.std_init             # initial std for Gaussian policy
+        self.use_retrace = args.use_retrace       # whether to use Retrace for critic update
 
+        # Main actor / critic networks
+        self.actor = Actor(env, args.hidden_size_actor, self.std_init).to(self.device)
+        self.critic = Critic(env, args.hidden_size_critic).to(self.device)
+
+        # Target networks (used for stable targets)
+        self.target_actor = Actor(env, args.hidden_size_actor, self.std_init).to(self.device)
+        self.target_critic = Critic(env, args.hidden_size_critic).to(self.device)
+
+        # How often to sync target networks with the main networks (in gradient updates)
+        self.target_update_period = args.target_update_period
+
+        # Initialize target networks with the same parameters as main networks
+        for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
+            target_param.data.copy_(param.data)
+            target_param.requires_grad = False     # target net is not trained directly
+
+        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
+            target_param.data.copy_(param.data)
+            target_param.requires_grad = False     # target net is not trained directly
+
+        # Optimizers & loss functions
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), self.learning_rate)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), self.learning_rate)
+
+        # Choose Q-loss type (MSE or Smooth L1)
+        self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
+
+        # Replay buffer
+        self.replaybuffer = ReplayBuffer()
+        self.save_replay_buffer = args.save_replay_buffer  # whether to save buffer to disk (if implemented)
+        self.q_update_step = 0                             # counts critic updates
+
+        # Dual variables / Lagrange multipliers and counters
+        # Temperature parameter for MPO E-step (initialized randomly)
         self.eta = np.random.rand()
-        self.eta_mu = 0.0  # lagrangian multiplier for continuous action space in the M-step
-        self.eta_sigma = 0.0  # lagrangian multiplier for continuous action space in the M-step
-        self.num_steps = 0
-        self.max_return_eval = -np.inf
-        self.start_iteration = 1
-        self.render = False
-        self.update_dual_function_interval = args.update_dual_function_interval
-        self.log_inner_interval = args.log_inner_interval 
 
+        # Lagrange multipliers for KL constraints in the M-step
+        self.eta_mu = 0.0      # for mean KL constraint
+        self.eta_sigma = 0.0   # for variance KL constraint
+
+        # Global step / iteration bookkeeping
+        self.num_steps = 0
+        self.start_iteration = 1
+        self.global_update = 1
+
+        # Rendering flag for evaluation (not used during training rollouts)
+        self.render = args.render
+
+        # 9) Logging buffers (stats accumulated between log calls)
+        # Critic-related statistics
         self.mean_loss_q = []
-        self.mean_loss_p = []
-        self.mean_loss_l = []
         self.mean_current_q = []
         self.mean_target_q = []
+
+        # Actor-related statistics
+        self.mean_loss_p = []
+        self.mean_loss_l = []
+
+        # KL and covariance statistics
         self.max_kl_mu = []
         self.max_kl_sigma = []
         self.mean_sigma_det = []
-        self.max_kl = []
+
+        # Variance statistics
         self.var_mean = []
         self.var_min = []
         self.var_max = []
-        self.runtime_env = 0.0
-        self.runtime_eval = 0.0
-        self.runtime_policy_eval = 0.0
-        self.runtime_E_step = 0.0
-        self.runtime_M_step = 0.0
-        self.global_update = 1
 
-    class MPO(object):
-        def __init__(self, env, args):
-            """
-            Main class implementing the MPO agent.
-            Holds:
-            - environment reference
-            - actor / critic networks and their target networks
-            - replay buffer
-            - all hyperparameters and logging buffers
-            """
-            # 1) Environment & basic dimensions
-            self.env = env
-            self.state_dim = env.observation_space.shape[0]
-            self.action_dim = env.action_space.shape[0]
-
-            # Device used for tensors / networks (CPU or GPU)
-            self.device = args.device
-
-            # MPO / optimization hyperparameters
-            # Dual / KL constraints
-            self.eps_dual = args.dual_constraint      # KL constraint for E-Step
-            self.eps_mu = args.kl_mean_constraint     # KL constraint for mean
-            self.eps_gamma = args.kl_var_constraint   # KL constraint for variance
-
-            # Discount factor for returns
-            self.gamma = args.discount_factor
-
-            # Lagrange multiplier step sizes (for KL constraints)
-            self.alpha_mu_scale = args.alpha_mean_scale     # scale for mean Lagrange multiplier update
-            self.alpha_sigma_scale = args.alpha_var_scale   # scale for variance Lagrange multiplier update
-
-            # Maximum values for Lagrange multipliers
-            self.alpha_mu_max = args.alpha_mean_max
-            self.alpha_sigma_max = args.alpha_var_max
-
-            # Temperature learning rate (for dual variable eta)
-            self.eta_lr = args.eta_lr
-
-            # Main learning rate for actor/critic optimizers
-            self.learning_rate = args.learning_rate
-
-            # How often we update eta (dual function)
-            self.update_dual_function_interval = args.update_dual_function_interval
-
-            # 3) Sampling / training schedule
-        
-            self.sample_episode_num = args.sample_episode_num    # Number of episodes to sample per iteration       
-            self.sample_episode_maxstep = args.sample_episode_maxstep   # Maximum steps per sampled episode
-            self.sample_action_num = args.sample_action_num  # Number of action samples per state in MPO E-step
-            self.batch_size = args.batch_size   # Minibatch size for training
-            self.UTD_ratio = args.UTD_ratio # Update-to-data ratio (how many updates per collected step)
-
-            # Number of M-step (actor) iterations per E-step
-            #self.mstep_iteration_num = args.mstep_iteration_num
-
-            # Number of steps to warm up the replay buffer before training
-            self.warm_up_steps = args.warm_up_steps
-
-            # Evaluation / logging / saving schedule
-            
-            self.evaluate_period = args.evaluate_period     # How often to run evaluation (in training iterations)
-            self.evaluate_episode_num = args.evaluate_episode_num    # Number of evaluation episodes
-            self.evaluate_episode_maxstep = args.evaluate_episode_maxstep   # Max steps per evaluation episode
-
-            # Logging behavior (e.g. WandB)
-            self.wandb_track = args.track
-            # Inner-loop logging interval (every N gradient updates)
-            self.log_inner_interval = args.log_inner_interval
-
-            # Model saving configuration
-            self.save_every = args.save_every
-            self.save_latest = args.save_latest
-            self.log_dir = args.log_dir
-            self.model_dir = os.path.join(self.log_dir, "model")
-            os.makedirs(self.model_dir, exist_ok=True)
-
-            # Policy / value networks and their targets
-            self.std_init = args.std_init             # initial std for Gaussian policy
-            self.use_retrace = args.use_retrace       # whether to use Retrace for critic update
-
-            # Main actor / critic networks
-            self.actor = Actor(env, args.hidden_size_actor, self.std_init).to(self.device)
-            self.critic = Critic(env, args.hidden_size_critic).to(self.device)
-
-            # Target networks (used for stable targets)
-            self.target_actor = Actor(env, args.hidden_size_actor, self.std_init).to(self.device)
-            self.target_critic = Critic(env, args.hidden_size_critic).to(self.device)
-
-            # How often to sync target networks with the main networks (in gradient updates)
-            self.target_update_period = args.target_update_period
-
-            # Initialize target networks with the same parameters as main networks
-            for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
-                target_param.data.copy_(param.data)
-                target_param.requires_grad = False     # target net is not trained directly
-
-            for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
-                target_param.data.copy_(param.data)
-                target_param.requires_grad = False     # target net is not trained directly
-
-            # Optimizers & loss functions
-            self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), self.learning_rate)
-            self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), self.learning_rate)
-
-            # Choose Q-loss type (MSE or Smooth L1)
-            self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
-
-            # Replay buffer
-            self.replaybuffer = ReplayBuffer()
-            self.save_replay_buffer = args.save_replay_buffer  # whether to save buffer to disk (if implemented)
-            self.q_update_step = 0                             # counts critic updates
-
-            # Dual variables / Lagrange multipliers and counters
-            # Temperature parameter for MPO E-step (initialized randomly)
-            self.eta = np.random.rand()
-
-            # Lagrange multipliers for KL constraints in the M-step
-            self.eta_mu = 0.0      # for mean KL constraint
-            self.eta_sigma = 0.0   # for variance KL constraint
-
-            # Global step / iteration bookkeeping
-            self.num_steps = 0
-            self.start_iteration = 1
-            self.global_update = 1
-
-            # Rendering flag for evaluation (not used during training rollouts)
-            self.render = args.render
-
-            # 9) Logging buffers (stats accumulated between log calls)
-            # Critic-related statistics
-            self.mean_loss_q = []
-            self.mean_current_q = []
-            self.mean_target_q = []
-
-            # Actor-related statistics
-            self.mean_loss_p = []
-            self.mean_loss_l = []
-
-            # KL and covariance statistics
-            self.max_kl_mu = []
-            self.max_kl_sigma = []
-            self.mean_sigma_det = []
-            self.max_kl = []        # currently unused, but kept for compatibility
-
-            # Variance statistics
-            self.var_mean = []
-            self.var_min = []
-            self.var_max = []
-
-            # Runtime measurements (seconds)
-            self.runtime_env = 0.0          # environment interaction time
-            self.runtime_eval = 0.0         # evaluation time
-            self.runtime_policy_eval = 0.0  # critic update time
-            self.runtime_E_step = 0.0       # MPO E-step time
-            self.runtime_M_step = 0.0       # MPO M-step time
+        # Runtime measurements (seconds)
+        self.runtime_env = 0.0          # environment interaction time
+        self.runtime_eval = 0.0         # evaluation time
+        self.runtime_policy_eval = 0.0  # critic update time
+        self.runtime_E_step = 0.0       # MPO E-step time
+        self.runtime_M_step = 0.0       # MPO M-step time
 
 
     def sample_trajectory(self):
@@ -375,13 +282,12 @@ class MPO(object):
             target_q = self.target_critic.forward(
                 expanded_states.reshape(-1, self.state_dim), sampled_actions.reshape(-1, self.action_dim)  # (N * K, action_dim)
             ).reshape(N, K)
-            target_q = target_q.cpu().transpose(0, 1).numpy()  # (K, N)
         
         # Treat target_q as constant w.r.t. eta (no gradients from critic/actor)
         eta_tensor = torch.tensor(self.eta, device=self.device, requires_grad=True)
 
         # Dual function returns a scalar that we differentiate w.r.t. eta
-        dual_val = self.dual_function(eta_tensor, target_q.detach(), self.eps_daul)
+        dual_val = self.dual_function(eta_tensor, target_q)
         dual_val.backward()
         with torch.no_grad():
             # Gradient descent update on eta
@@ -396,7 +302,7 @@ class MPO(object):
         return sampled_actions, norm_target_q, b_mu, b_A
     
 
-    def maximization_step(self, state_batch,norm_target_q, sampled_actions, b_mu, b_A): 
+    def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_A): 
         """
         M-step of MPO:
         - Update the policy parameters to maximize the weighted log-likelihood
@@ -468,8 +374,7 @@ class MPO(object):
         
         self.render = render
 
-        # Global counter for how many gradient updates have been performed
-        global_update = 1
+        # Buffer size for warm up
         buffer_size = len(self.replaybuffer)
         
         # Precompute how many critic/actor updates we want per iteration
@@ -480,7 +385,10 @@ class MPO(object):
 
         # Warm-up: fill replay buffer with some initial experience
         while buffer_size < self.warm_up_steps:
-            self.sample_trajectory(self.sample_episode_num)
+            self.sample_trajectory()
+
+            # Update buffer size after adding new episodes
+            buffer_size= len(self.replaybuffer)
         
         # Main training iterations
         for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations"):
@@ -490,9 +398,6 @@ class MPO(object):
             self.sample_trajectory()
             t_env_end = time.perf_counter()
             self.runtime_env += t_env_end - t_env_start
-
-            # Update buffer size after adding new episodes
-            buffer_size = len(self.replaybuffer)
 
             # Perform several updates per iteration (UTD ratio)
             for r in range(num_updates_per_iter):
@@ -532,20 +437,20 @@ class MPO(object):
 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()
-                sampled_actions, norm_target_q, b_mu, b_A = self.expectation_step(self, state_batch)
+                sampled_actions, norm_target_q, b_mu, b_A = self.expectation_step(state_batch)
                 t_E_step_end = time.perf_counter()         
                 self.runtime_E_step += t_E_step_end - t_E_step_start
 
                 # M-step (actor / policy update)
                 t_M_step_start = time.perf_counter()
-                self.maximization_step(self, state_batch,norm_target_q, sampled_actions, b_mu, b_A)
+                self.maximization_step(state_batch,norm_target_q, sampled_actions, b_mu, b_A)
                 t_M_step_end = time.perf_counter()
                 self.runtime_M_step += t_M_step_end - t_M_step_start
                 
                 # Target network update & logging
 
                 # Periodically sync target networks with current actor/critic
-                if global_update % self.target_update_period == 0:
+                if self.global_update % self.target_update_period == 0:
                     self.update_target_actor_critic()
 
                 # Approximate number of env steps so far
@@ -587,7 +492,7 @@ class MPO(object):
                 # Build evaluation logs (separate from training logs)
                 logs = {
                     "num_steps": self.num_steps,
-                    "global_update": global_update,
+                    "global_update": self.global_update,
                     "iteration": self.iteration,
                     "mean_return_buffer": self.mean_return_buffer,
                     "mean_reward_buffer": self.mean_reward_buffer,
@@ -722,7 +627,7 @@ class MPO(object):
         for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
     
-    def dual_function(self, eta, target_q, eps_daul):
+    def dual_function(self, eta, target_q):
         """
         eta: scalar Tensor, requires_grad=True
         target_q: Tensor shape (N, K)
@@ -735,7 +640,7 @@ class MPO(object):
         log_term = torch.log(inner_mean)               # (K,)
         
         dual_value = (
-            eta * eps_daul
+            eta * self.eps_dual
             + max_q.squeeze(1).mean()                  # mean der max_q über K
             + eta * log_term.mean()
         )

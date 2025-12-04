@@ -87,7 +87,8 @@ class Args:
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
-    
+    warm_up_steps: int = 10000
+
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
