@@ -7,14 +7,14 @@ class Actor(nn.Module):
     
     #Policy network
     
-    def __init__(self, env, hidden_size_actor, std_init, use_tanh_mean: bool = False):
+    def __init__(self, env, hidden_size_actor, std_init):
         super(Actor, self).__init__()
         self.env = env
         self.ds = env.observation_space.shape[0]
         self.da = env.action_space.shape[0]
         self.hs= hidden_size_actor
-        self.use_tanh_mean = use_tanh_mean
         self._printed_init_cov = False
+        
 
         self.backbone = nn.Sequential(
             nn.Linear(self.ds, self.hs),
@@ -54,24 +54,12 @@ class Actor(nn.Module):
         B = state.size(0)
         ds = self.ds
         da = self.da
-        if torch.isnan(state).any() or torch.isinf(state).any():
-            print("🚨 NaN/Inf im INPUT state:", state)
-            raise ValueError("NaN/Inf in state (Actor forward)")
 
-        # Do i need normalization of action?
-        #action_low = torch.from_numpy(self.env.action_space.low)[None, ...].to(device)  # (1, da)
-        #action_high = torch.from_numpy(self.env.action_space.high)[None, ...].to(device)  # (1, da)
-        #action_low = torch.as_tensor(self.env.action_space.low, device=device, dtype=torch.float32).unsqueeze(0)
-        #action_high = torch.as_tensor(self.env.action_space.high, device=device, dtype=torch.float32).unsqueeze(0)
         x = self.backbone(state)   # (B, hs)
         
         #Mean Kopf
         mean = self.mean_layer(x)   # (B, da)
-        
-        if self.use_tanh_mean:
-            mean = torch.tanh(mean)
-
-
+    
         # Cholesky-Kopf
         cholesky_vector = self.cholesky_layer(x)   # (B, da*(da+1)//2)
 
@@ -94,13 +82,9 @@ class Actor(nn.Module):
             self._printed_init_cov = True
 
         return mean, cholesky
-    """
-    def distribution(mean, cholesky):
-
-        action_distribution = MulivariateNormal(mean, scale_tril = cholesky)
-        return action_distribution
-    """    
-    def action(self, state):
+   
+     
+    def action(self, state, clip_to_env: bool = True):
         """
         :param state: (ds,)
         :return: an action
@@ -109,19 +93,35 @@ class Actor(nn.Module):
             state_batched = self.ensure_batched(state)
             mean, cholesky = self.forward(state_batched)
             action_distribution = MultivariateNormal(mean, scale_tril=cholesky)
-            action = action_distribution.sample()
-        return action[0]
+            action = action_distribution.sample()[0]
+
+            if clip_to_env:
+                low = torch.as_tensor(self.env.action_space.low, device=action.device, dtype=action.dtype)
+                high = torch.as_tensor(self.env.action_space.high, device=action.device, dtype=action.dtype)
+                action = torch.clamp(action, low, high)
+        return action.cpu().numpy()
 
     def evaluate_action(self, state, action):
-        with torch.no_grad():
-            state_batched = self.ensure_batched(state)
-            action_batched = self.ensure_batched(action)
-            mean, cholesky = self.forward(state_batched)
-            action_distribution = MultivariateNormal(mean, scale_tril=cholesky)
-            log_prob = action_distribution.log_prob(action_batched)
+        """
+        Compute log-probability of given action under the actor's policy.
+        :param state: (ds,) or (B, ds)
+        :param action: (da,) or (B, da)
+        :return: log_prob tensor with shape (B,)
+        """
+        state_batched = self.ensure_batched(state)
+        action_batched = self.ensure_batched(action)
+        mean, cholesky = self.forward(state_batched)
+        action_distribution = MultivariateNormal(mean, scale_tril=cholesky)
+        log_prob = action_distribution.log_prob(action_batched)
         return log_prob
 
     def sample_action(self, state, sample_num):
+        """
+        Sample multiple actions per state from the current policy.
+        :param state: (ds,) or (B, ds)
+        :param sample_num: number of action samples per state (N)
+        :return: samples with shape (B, N, da)
+        """
         with torch.no_grad():
             state_batched = self.ensure_batched(state)
             mean, cholesky = self.forward(state_batched)

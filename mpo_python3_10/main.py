@@ -44,14 +44,10 @@ class Args:
     # ===============================
     iteration_num: int = 1000
     """number of outer MPO iterations"""
-    num_updates_per_iter: int = 5
-    """how many passes over replay buffer per MPO iteration"""
-    sample_action_num: int = 64
+    sample_action_num: int = 20
     """number of action samples per state for E-step weighting"""
     target_update_period: int = 200
     "number of Q-updates steps per new target init"
-    update_dual_function_interval: int = 10
-    "Number of gradient updates per update on dual function"
     log_dir: str = "mpo_logs"
     """directory used for logs and model checkpoints"""
     discount_factor: float = 0.99
@@ -79,37 +75,30 @@ class Args:
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
     alpha_var_scale: float = 0.1
     """learning rate / scale factor for updating eta_sigma (variance KL Lagrange multiplier)"""
-    alpha_scale: float = 10.0
-    """generic scale factor for joint KL, used in some MPO variants (optional / fallback)"""
     alpha_mean_max: float = 0.1
     """maximum clamp value for eta_mu (mean KL Lagrange multiplier)"""
     alpha_var_max: float = 1.0
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
-    alpha_max: float = 10.0
-    """maximum clamp value for generic dual variables (if used together with alpha_scale)"""
     q_loss_type: str = 'mse'
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
-    clear_replay_buffer: bool = False
-    """if True: empty the replay buffer at every outer iteration (forces on-policy MPO behavior)"""
+    UTD_ratio: float = 1.0
+    """ Ratio: num_updates per env step"""
     max_replay_buffer: int = 2000000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
-    use_tanh_mean: bool = False
-    """Flag to determine the use of the tanh after the mean layer"""
+    
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
-
-    sample_episode_num: int = 20
+    sample_episode_num: int = 1
     """number of episodes sampled per MPO iteration"""
     sample_episode_maxstep: int = 1000
     """maximum number of steps per sampled episode"""
-    batch_size: int = 1024
+    batch_size: int = 512
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    
 
     # ===============================
     # Evaluation Parameters
@@ -177,7 +166,6 @@ def log_callback(logs):
         "mean_current_q",
         "mean_target_q",
         "eta",
-        "runtime_train",
         "runtime_env",
         "runtime_eval",
         "runtime_policy_eval",

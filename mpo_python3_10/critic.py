@@ -1,19 +1,29 @@
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
 
 
 class Critic(nn.Module):
     """
-    :param env: OpenAI gym environment
+    State-action value function Q(s, a) approximator.
+
+    This critic takes as input a state and an action, concatenates them,
+    and outputs a single scalar Q-value per batch element.
     """
     def __init__(self, env, hidden_size_critic):
+
+        """
+        :param env: Gym/Gymnasium-like environment (used to infer state/action dims)
+        :param hidden_size_critic: hidden layer size of the critic network
+        """
         super(Critic, self).__init__()
+
+        # Dimensions
         self.env = env
         self.ds = env.observation_space.shape[0]
         self.da = env.action_space.shape[0]
         self.hs = hidden_size_critic
 
+        # Simple MLP over concatenated [state, action]
         self.net = nn.Sequential(
             nn.Linear(self.ds + self.da, self.hs),
             nn.LayerNorm(self.hs),
@@ -25,10 +35,16 @@ class Critic(nn.Module):
    
     def forward(self, state, action):
         """
-        :param state: (B, ds)
-        :param action: (B, da)
-        :return: Q-value
+        Forward pass of the critic network.
+
+        :param state:  Tensor of shape (B, ds)
+        :param action: Tensor of shape (B, da)
+        :return: Q-values with shape (B, 1)
         """
+
+        # Concatenate state and action along the feature dimension
         h = torch.cat([state, action], dim=1)  # (B, ds+da)
-        Q = self.net(h)
+
+        # Pass through the network
+        Q = self.net(h)     #(B,1)
         return Q
