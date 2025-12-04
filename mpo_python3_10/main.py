@@ -88,6 +88,9 @@ class Args:
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
     warm_up_steps: int = 10000
+    """number of warm-up steps for the buffer"""
+    delay_policy_update: int = 1
+    """number of critic updates per policy update"""
 
     # ===============================
     # Sampling / Replay Buffer

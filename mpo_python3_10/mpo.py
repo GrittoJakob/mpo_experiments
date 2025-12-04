@@ -111,6 +111,7 @@ class MPO(object):
         self.sample_action_num = args.sample_action_num  # Number of action samples per state in MPO E-step
         self.batch_size = args.batch_size   # Minibatch size for training
         self.UTD_ratio = args.UTD_ratio # Update-to-data ratio (how many updates per collected step)
+        self.delay_policy_update = args.delay_policy_update
 
         # Number of M-step (actor) iterations per E-step
         #self.mstep_iteration_num = args.mstep_iteration_num
@@ -184,7 +185,7 @@ class MPO(object):
         self.num_steps = 0
         self.start_iteration = 1
         self.global_update = 1
-
+        
         # Rendering flag for evaluation (not used during training rollouts)
         self.render = args.render
 
@@ -399,6 +400,7 @@ class MPO(object):
             t_env_end = time.perf_counter()
             self.runtime_env += t_env_end - t_env_start
 
+            
             # Perform several updates per iteration (UTD ratio)
             for r in range(num_updates_per_iter):
 
@@ -435,46 +437,47 @@ class MPO(object):
                 self.mean_current_q.append(Q_current.abs().mean().item())
                 self.mean_target_q.append(Q_target.abs().mean().item())
 
-                # E-step (build non-parametric target distribution)
-                t_E_step_start = time.perf_counter()
-                sampled_actions, norm_target_q, b_mu, b_A = self.expectation_step(state_batch)
-                t_E_step_end = time.perf_counter()         
-                self.runtime_E_step += t_E_step_end - t_E_step_start
+                if r % self.delay_policy_update == 0:
+                    # E-step (build non-parametric target distribution)
+                    t_E_step_start = time.perf_counter()
+                    sampled_actions, norm_target_q, b_mu, b_A = self.expectation_step(state_batch)
+                    t_E_step_end = time.perf_counter()         
+                    self.runtime_E_step += t_E_step_end - t_E_step_start
 
-                # M-step (actor / policy update)
-                t_M_step_start = time.perf_counter()
-                self.maximization_step(state_batch,norm_target_q, sampled_actions, b_mu, b_A)
-                t_M_step_end = time.perf_counter()
-                self.runtime_M_step += t_M_step_end - t_M_step_start
-                
-                # Target network update & logging
-
-                # Periodically sync target networks with current actor/critic
-                if self.global_update % self.target_update_period == 0:
-                    self.update_target_actor_critic()
-
-                # Approximate number of env steps so far
-                self.num_steps = it * self.sample_episode_num * self.sample_episode_maxstep
-
-                # Inner-loop logging (e.g. every few gradient steps)
-                if r % self.log_inner_interval == 0:
+                    # M-step (actor / policy update)
+                    t_M_step_start = time.perf_counter()
+                    self.maximization_step(state_batch,norm_target_q, sampled_actions, b_mu, b_A)
+                    t_M_step_end = time.perf_counter()
+                    self.runtime_M_step += t_M_step_end - t_M_step_start
                     
-                    # Compute mean reward/return in replay buffer
-                    self.mean_reward_buffer = self.replaybuffer.mean_reward()
-                    self.mean_return_buffer = self.replaybuffer.mean_return()                 
+                    # Target network update & logging
 
-                    # Build log dict from current statistics    
-                    logs = self._build_logs()
-                    
-                    # Send logs to WandB or other callback if enabled
-                    if self.wandb_track is True and log_callback is not None:
-                        log_callback(logs)
+                    # Periodically sync target networks with current actor/critic
+                    if self.global_update % self.target_update_period == 0:
+                        self.update_target_actor_critic()
 
-                    # Reset lists of per-update stats for the next logging window
-                    self.reset_logs()
+                    # Approximate number of env steps so far
+                    self.num_steps = it * self.sample_episode_num * self.sample_episode_maxstep + self.warm_up_steps
 
-                # Increase global update counter after each gradient update    
-                self.global_update += 1
+                    # Inner-loop logging (e.g. every few gradient steps)
+                    if r % self.log_inner_interval == 0:
+                        
+                        # Compute mean reward/return in replay buffer
+                        self.mean_reward_buffer = self.replaybuffer.mean_reward()
+                        self.mean_return_buffer = self.replaybuffer.mean_return()                 
+
+                        # Build log dict from current statistics    
+                        logs = self._build_logs()
+                        
+                        # Send logs to WandB or other callback if enabled
+                        if self.wandb_track is True and log_callback is not None:
+                            log_callback(logs)
+
+                        # Reset lists of per-update stats for the next logging window
+                        self.reset_logs()
+
+                    # Increase global update counter after each gradient update    
+                    self.global_update += 1
 
             # Evaluation in the outer loop
             if it % self.evaluate_period == 0:
