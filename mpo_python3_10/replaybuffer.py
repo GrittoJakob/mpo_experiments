@@ -11,7 +11,7 @@ class ReplayBuffer:
     - self.start_idx_of_episode: starting flattened index for each episode
     """   
 
-    def __init__(self, max_replay_buffer: int = 200000):
+    def __init__(self, max_replay_buffer: int = 2000000):
         """
         :param max_replay_buffer: maximum number of transitions stored.
                                   Oldest episodes are removed when exceeded.

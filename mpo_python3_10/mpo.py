@@ -169,7 +169,7 @@ class MPO(object):
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
 
         # Replay buffer
-        self.replaybuffer = ReplayBuffer()
+        self.replaybuffer = ReplayBuffer(args.max_replay_buffer)
         self.save_replay_buffer = args.save_replay_buffer  # whether to save buffer to disk (if implemented)
         self.q_update_step = 0      # counts critic updates
 
@@ -223,9 +223,11 @@ class MPO(object):
         Collect a number of episodes by interacting with the environment
         using the current policy and store them in the replay buffer.
         Each episode is stored as a list of (state, action, next_state, reward) tuples.
+        Returns:
+        total_steps_collected (int): number of env steps actually executed
         """
         episodes = []
-
+        total_steps_collected = 0
         # Loop over episodes to collect
         for _ in range(self.sample_episode_num):
             buff = []
@@ -233,7 +235,8 @@ class MPO(object):
 
             # Roll out one episode up to a maximum number of steps
             for _ in range(self.sample_episode_maxstep):
-         
+                
+
                 state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
                 
                 # Get action from actor
@@ -242,6 +245,7 @@ class MPO(object):
 
                 # Step the environment
                 next_state, reward, terminated, truncated, info = self.env.step(action)
+                total_steps_collected += 1
                 done = terminated or truncated  # Gymnasium: done = terminated OR truncated
                 
                 # Store transition in the current episode buffer
@@ -253,9 +257,12 @@ class MPO(object):
 
             # Store completed episode
             episodes.append(buff)
-        
+
         # Push all collected episodes into the replay buffer
         self.replaybuffer.store_episodes(episodes)
+        return total_steps_collected
+        
+       
 
     def expectation_step(self, state_batch):
         """
@@ -381,13 +388,10 @@ class MPO(object):
         
         # Precompute how many critic/actor updates we want per iteration
         # UTD_ratio * (num episodes * max steps per episode)
-        num_updates_per_iter = math.ceil(
-            self.UTD_ratio * self.sample_episode_num * self.sample_episode_maxstep
-        )
-
+       
         # Warm-up: fill replay buffer with some initial experience
         while self.buffer_size < self.warm_up_steps:
-            self.sample_trajectory()
+            _ = self.sample_trajectory()
 
             # Update buffer size after adding new episodes
             self.buffer_size= len(self.replaybuffer)
@@ -397,15 +401,18 @@ class MPO(object):
 
             # Collect fresh experience for this iteration
             t_env_start = time.perf_counter()
-            self.sample_trajectory()
+            steps = self.sample_trajectory()
             t_env_end = time.perf_counter()
             self.runtime_env += t_env_end - t_env_start
 
-            self.buffer_size= len(self.replaybuffer)
-            
+            num_updates_per_iter = math.ceil(
+            self.UTD_ratio * steps
+            )
+
             # Perform several updates per iteration (UTD ratio)
             for r in range(num_updates_per_iter):
-
+                
+                self.buffer_size= len(self.replaybuffer)
                 # Sample a minibatch from buffer    
                 indices = np.random.choice(
                     self.buffer_size,
@@ -451,31 +458,28 @@ class MPO(object):
                     self.maximization_step(state_batch,norm_target_q, sampled_actions, b_mu, b_A)
                     t_M_step_end = time.perf_counter()
                     self.runtime_M_step += t_M_step_end - t_M_step_start
+
+                # Inner-loop logging (e.g. every few gradient steps)
+                if r % self.log_inner_interval == 0:
                     
-                    # Target network update & logging
-                    # Periodically sync target networks with current actor/critic
-                    if self.global_update % self.target_update_period == 0:
-                        self.update_target_actor_critic()
+                    # Compute mean reward/return in replay buffer
+                    self.mean_reward_buffer = self.replaybuffer.mean_reward()
+                    self.mean_return_buffer = self.replaybuffer.mean_return()                 
 
-                    # Approximate number of env steps so far
-                    self.num_steps = it * self.sample_episode_num * self.sample_episode_maxstep + self.warm_up_steps
+                    # Build log dict from current statistics    
+                    logs = self._build_logs()
+                    
+                    # Send logs to WandB or other callback if enabled
+                    if self.wandb_track is True and log_callback is not None:
+                        log_callback(logs)
 
-                    # Inner-loop logging (e.g. every few gradient steps)
-                    if r % self.log_inner_interval == 0:
-                        
-                        # Compute mean reward/return in replay buffer
-                        self.mean_reward_buffer = self.replaybuffer.mean_reward()
-                        self.mean_return_buffer = self.replaybuffer.mean_return()                 
+                    # Reset lists of per-update stats for the next logging window
+                    self.reset_logs()
 
-                        # Build log dict from current statistics    
-                        logs = self._build_logs()
-                        
-                        # Send logs to WandB or other callback if enabled
-                        if self.wandb_track is True and log_callback is not None:
-                            log_callback(logs)
-
-                        # Reset lists of per-update stats for the next logging window
-                        self.reset_logs()
+                # Target network update & logging
+                # Periodically sync target networks with current actor/critic
+                if self.global_update % self.target_update_period == 0:
+                    self.update_target_actor_critic()
 
                 # Increase global update counter after each gradient update    
                 self.global_update += 1

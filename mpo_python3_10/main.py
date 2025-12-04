@@ -34,7 +34,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_inner_interval: int = 25
+    log_inner_interval: int = 50
     "number of global updates per log to wandb"
     num_threads: int = 16  
     """number of threads to use"""
