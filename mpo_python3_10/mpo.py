@@ -171,8 +171,9 @@ class MPO(object):
         # Replay buffer
         self.replaybuffer = ReplayBuffer()
         self.save_replay_buffer = args.save_replay_buffer  # whether to save buffer to disk (if implemented)
-        self.q_update_step = 0                             # counts critic updates
+        self.q_update_step = 0      # counts critic updates
 
+        self.buffer_size = 0                           
         # Dual variables / Lagrange multipliers and counters
         # Temperature parameter for MPO E-step (initialized randomly)
         self.eta = np.random.rand()
@@ -226,12 +227,12 @@ class MPO(object):
         episodes = []
 
         # Loop over episodes to collect
-        for ep_idx in range(self.sample_episode_num):
+        for _ in range(self.sample_episode_num):
             buff = []
             state, info = self.env.reset()
 
             # Roll out one episode up to a maximum number of steps
-            for steps in range(self.sample_episode_maxstep):
+            for _ in range(self.sample_episode_maxstep):
          
                 state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
                 
@@ -376,7 +377,7 @@ class MPO(object):
         self.render = render
 
         # Buffer size for warm up
-        buffer_size = len(self.replaybuffer)
+        self.buffer_size = len(self.replaybuffer)
         
         # Precompute how many critic/actor updates we want per iteration
         # UTD_ratio * (num episodes * max steps per episode)
@@ -385,11 +386,11 @@ class MPO(object):
         )
 
         # Warm-up: fill replay buffer with some initial experience
-        while buffer_size < self.warm_up_steps:
+        while self.buffer_size < self.warm_up_steps:
             self.sample_trajectory()
 
             # Update buffer size after adding new episodes
-            buffer_size= len(self.replaybuffer)
+            self.buffer_size= len(self.replaybuffer)
         
         # Main training iterations
         for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations"):
@@ -400,13 +401,14 @@ class MPO(object):
             t_env_end = time.perf_counter()
             self.runtime_env += t_env_end - t_env_start
 
+            self.buffer_size= len(self.replaybuffer)
             
             # Perform several updates per iteration (UTD ratio)
             for r in range(num_updates_per_iter):
 
                 # Sample a minibatch from buffer    
                 indices = np.random.choice(
-                    buffer_size,
+                    self.buffer_size,
                     size=self.batch_size,
                     replace=False  # oder True, wenn du sehr viele Updates machen willst
                 )        
@@ -451,7 +453,6 @@ class MPO(object):
                     self.runtime_M_step += t_M_step_end - t_M_step_start
                     
                     # Target network update & logging
-
                     # Periodically sync target networks with current actor/critic
                     if self.global_update % self.target_update_period == 0:
                         self.update_target_actor_critic()
@@ -476,8 +477,8 @@ class MPO(object):
                         # Reset lists of per-update stats for the next logging window
                         self.reset_logs()
 
-                    # Increase global update counter after each gradient update    
-                    self.global_update += 1
+                # Increase global update counter after each gradient update    
+                self.global_update += 1
 
             # Evaluation in the outer loop
             if it % self.evaluate_period == 0:
@@ -500,6 +501,7 @@ class MPO(object):
                     "mean_return_buffer": self.mean_return_buffer,
                     "mean_reward_buffer": self.mean_reward_buffer,
                     "return_eval": return_eval,
+                    "buffer_size": self.buffer_size
                     }
                 if log_callback is not None:
                     log_callback(logs)

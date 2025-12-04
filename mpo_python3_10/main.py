@@ -42,7 +42,7 @@ class Args:
     # ===============================
     # MPO Algorithm Parameters
     # ===============================
-    iteration_num: int = 1000
+    iteration_num: int = 100
     """number of outer MPO iterations"""
     sample_action_num: int = 20
     """number of action samples per state for E-step weighting"""
@@ -183,6 +183,7 @@ def log_callback(logs):
         "var_mean",
         "var_min",
         "var_max"
+        "buffer_size"
     ]:
         if key in logs:
             tag = key.replace("_", "/") if key.startswith("eval_") else key
