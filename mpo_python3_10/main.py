@@ -4,11 +4,12 @@ import random
 from dataclasses import dataclass
 import numpy as np
 import torch
-import gymnasium as gym
-from torch.utils.tensorboard import SummaryWriter
 import tyro
+from torch.utils.tensorboard import SummaryWriter
+import gymnasium as gym
 import wandb
 from typing import Optional
+from utils import limit_threads, make_env
 
 from mpo import MPO
 
@@ -129,29 +130,6 @@ class Args:
     """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
     save_replay_buffer: bool = True
     """whether to include replay buffer in checkpoints (large files!)"""
-        
-def limit_threads(n: int):
-    # PyTorch threads
-    torch.set_num_threads(n)
-    torch.set_num_interop_threads(1)
-
-    # NumPy / BLAS threads (muss vor Imports passieren, aber auch so meist ok)
-    os.environ["OMP_NUM_THREADS"] = str(n)
-    os.environ["OPENBLAS_NUM_THREADS"] = str(n)
-    os.environ["MKL_NUM_THREADS"] = str(n)
-    os.environ["NUMEXPR_NUM_THREADS"] = str(n)
-   
-
-def make_env(env_id, capture_video, run_name):
-    if capture_video:
-        env = gym.make(env_id, render_mode="rgb_array")
-        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-    else:
-        env = gym.make(env_id)
-
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = gym.wrappers.ClipAction(env)
-    return env
 
 def log_callback(logs):
 
@@ -191,8 +169,7 @@ def log_callback(logs):
 
     # --- W&B ---
     wandb.log(logs, step=global_update)
-    
-   
+
 if __name__ == "__main__":
     args = tyro.cli(Args)  # CLI aus der Dataclass
     limit_threads(args.num_threads)

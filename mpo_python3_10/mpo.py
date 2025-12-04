@@ -15,50 +15,7 @@ from critic import Critic
 from replaybuffer import ReplayBuffer
 import time
 import math
-
-
-def btr(m):
-    return m.diagonal(dim1=-2, dim2=-1).sum(-1)
-
-def bt(m):
-    return m.transpose(dim0=-2, dim1=-1)
-
-def gaussian_kl(mu_i, mu, Ai, A):
-    """
-       Computes KL for multivariate Gaussians with Cholesky factors Ai (old) and A (new).
-    Returns:
-      - C_mu:    mean KL for mean
-      - C_sigma: mean KL for covariance
-      - sigma_i_det: mean determinant of old cov
-      - sigma_det: mean determinant of new cov
-      - var_mean: mean diagonal variance of Σ
-      - var_min:  minimum diagonal variance
-      - var_max:  maximum diagonal variancen: mean of determinanats of sigma_i, sigma
-
-    """
-    n = A.size(-1)
-    mu_i = mu_i.unsqueeze(-1)  # (B, n, 1)
-    mu = mu.unsqueeze(-1)  # (B, n, 1)
-
-    sigma_i = Ai @ bt(Ai)  # (B, n, n)
-    sigma = A @ bt(A)  # (B, n, n)
-    sigma_i_det = sigma_i.det()  # (B,)
-    sigma_det = sigma.det()  # (B,)
-    sigma_i_det = torch.clamp_min(sigma_i_det, 1e-6)
-    sigma_det = torch.clamp_min(sigma_det, 1e-6)
-    sigma_i_inv = sigma_i.inverse()  # (B, n, n)
-    sigma_inv = sigma.inverse()  # (B, n, n)
-
-    inner_mu = ((mu - mu_i).transpose(-2, -1) @ sigma_i_inv @ (mu - mu_i)).squeeze()  # (B,)
-    inner_sigma = torch.log(sigma_det / sigma_i_det) - n + btr(sigma_inv @ sigma_i)  # (B,)
-    C_mu = 0.5 * torch.mean(inner_mu)
-    C_sigma = 0.5 * torch.mean(inner_sigma)
-    
-    var_diag = torch.diagonal(sigma, dim1=-2, dim2=-1)  # (B,n)
-    var_mean = var_diag.mean()         # Mean 
-    var_min  = var_diag.min()          # Minimal variance
-    var_max  = var_diag.max()          # maximum variance
-    return C_mu, C_sigma, torch.mean(sigma_i_det), torch.mean(sigma_det), var_mean, var_min, var_max
+from utils import btr,  bt, gaussian_kl
         
 class MPO(object):
     def __init__(self, env, args):
@@ -258,7 +215,7 @@ class MPO(object):
             # Store completed episode
             episodes.append(buff)
 
-        # Push all collected episodes into the replay buffer
+        # Push all collected episodes into the replay buffer and returns the number of collected steps
         self.replaybuffer.store_episodes(episodes)
         return total_steps_collected
         
