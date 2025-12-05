@@ -84,7 +84,7 @@ class Actor(nn.Module):
         return mean, cholesky
    
      
-    def action(self, state, clip_to_env: bool = True):
+    def action(self, state, clip_to_env: bool = True, deterministic: bool = False):
         """
         :param state: (ds,)
         :return: an action
@@ -93,7 +93,11 @@ class Actor(nn.Module):
             state_batched = self.ensure_batched(state)
             mean, cholesky = self.forward(state_batched)
             action_distribution = MultivariateNormal(mean, scale_tril=cholesky)
-            action = action_distribution.sample()[0]
+
+            if deterministic:
+                action = mean[0]
+            else:
+                action = action_distribution.sample()[0]
 
             if clip_to_env:
                 low = torch.as_tensor(self.env.action_space.low, device=action.device, dtype=action.dtype)

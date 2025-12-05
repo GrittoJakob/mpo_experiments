@@ -218,8 +218,6 @@ class MPO(object):
         # Push all collected episodes into the replay buffer and returns the number of collected steps
         self.replaybuffer.store_episodes(episodes)
         return total_steps_collected
-        
-       
 
     def expectation_step(self, state_batch):
         """
@@ -561,7 +559,7 @@ class MPO(object):
                         )
                     
                     # Get action from actor
-                    action = self.actor.action(state_tensor)
+                    action = self.actor.action(state_tensor, deterministic = True)
 
                     # Step environment
                     next_state, reward, terminated, truncated, info = self.env.step(action)
