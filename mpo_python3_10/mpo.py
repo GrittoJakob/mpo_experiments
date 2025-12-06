@@ -62,8 +62,9 @@ class MPO(object):
         #self.update_dual_function_interval = args.update_dual_function_interval
 
         # 3) Sampling / training schedule
-    
-        self.sample_episode_num = args.sample_episode_num    # Number of episodes to sample per iteration       
+
+        self.max_training_steps = args.max_training_steps
+        self.sample_steps_per_iter = args.sample_steps_per_iter     # Number of steps to sample per iteration       
         self.sample_episode_maxstep = args.sample_episode_maxstep   # Maximum steps per sampled episode
         self.sample_action_num = args.sample_action_num  # Number of action samples per state in MPO E-step
         self.batch_size = args.batch_size   # Minibatch size for training
@@ -185,36 +186,38 @@ class MPO(object):
         """
         episodes = []
         total_steps_collected = 0
-        # Loop over episodes to collect
-        for _ in range(self.sample_episode_num):
-            buff = []
-            state, info = self.env.reset()
+        self.actor.eval()
+        
+        with torch.no_grad():
+            # Loop over episodes to collect
+            while total_steps_collected < self.sample_steps_per_iter:
+                buff = []
+                state, info = self.env.reset()
 
-            # Roll out one episode up to a maximum number of steps
-            for _ in range(self.sample_episode_maxstep):
-                
+                # Roll out one episode up to a maximum number of steps
+                for _ in range(self.sample_episode_maxstep):
+                    state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+                    
+                    # Get action from actor
+                    # NOTE: Actor.action already returns a NumPy array
+                    action = self.actor.action(state_tensor)
 
-                state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-                
-                # Get action from actor
-                # NOTE: Actor.action already returns a NumPy array
-                action = self.actor.action(state_tensor)
+                    # Step the environment
+                    next_state, reward, terminated, truncated, info = self.env.step(action)
+                    total_steps_collected += 1
+                    
+                    # Store transition in the current episode buffer
+                    buff.append((state, action, next_state, reward))
 
-                # Step the environment
-                next_state, reward, terminated, truncated, info = self.env.step(action)
-                total_steps_collected += 1
-                done = terminated or truncated  # Gymnasium: done = terminated OR truncated
-                
-                # Store transition in the current episode buffer
-                buff.append((state, action, next_state, reward))
+                    if terminated or truncated:
+                        break
+                    state = next_state
 
-                if done:
-                    break
-                state = next_state
+                # Store completed episode
+                episodes.append(buff)
 
-            # Store completed episode
-            episodes.append(buff)
-
+        self.actor.train()
+        
         # Push all collected episodes into the replay buffer and returns the number of collected steps
         self.replaybuffer.store_episodes(episodes)
         return total_steps_collected
@@ -380,6 +383,8 @@ class MPO(object):
         print(f"[DEBUG] start_iteration = {self.start_iteration}, iteration_num = {iteration_num}")
         
         self.render = render
+        max_training_steps = self.max_training_steps
+        num_steps = 0
 
         # Buffer size for warm up
         self.buffer_size = len(self.replaybuffer)
@@ -389,22 +394,32 @@ class MPO(object):
        
         # Warm-up: fill replay buffer with some initial experience
         while self.buffer_size < self.warm_up_steps:
-            _ = self.sample_trajectory()
-
+            new_steps = self.sample_trajectory()
+            num_steps += new_steps
             # Update buffer size after adding new episodes
             self.buffer_size= len(self.replaybuffer)
         
         # Main training iterations
-        for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations"):
+        pbar = tqdm(total=max_training_steps, desc="Env steps")
+        it = self.start_iteration
+        while num_steps < max_training_steps:
 
             # Collect fresh experience for this iteration
             t_env_start = time.perf_counter()
-            steps = self.sample_trajectory()
+            new_steps = self.sample_trajectory()
+
+            #Update current steps for while loop
+            num_steps += new_steps
+
+            # For terminal logging
+            pbar.update(new_steps)
+
+            # Logging runtime env end
             t_env_end = time.perf_counter()
             self.runtime_env += t_env_end - t_env_start
 
             num_updates_per_iter = math.ceil(
-            self.UTD_ratio * steps
+            self.UTD_ratio * new_steps
             )
 
             # Perform several updates per iteration (UTD ratio)
@@ -506,9 +521,12 @@ class MPO(object):
                 if log_callback is not None:
                     log_callback(logs)
 
+                t_eval_end = time.perf_counter()
+                self.runtime_eval += t_eval_end -t_eval_start 
+            
             self.save(it)
-            t_eval_end = time.perf_counter()
-            self.runtime_eval += t_eval_end -t_eval_start     
+            it += 1  
+        pbar.close()
 
     ## Mistake: need to change buffer for storage of old policies!
     def critic_update_retrace(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):

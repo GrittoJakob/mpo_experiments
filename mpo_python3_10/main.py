@@ -96,14 +96,16 @@ class Args:
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
-    sample_episode_num: int = 1
-    """number of episodes sampled per MPO iteration"""
+    sample_steps_per_iter: int = 1000
+    """number of env steps to sample per iteration"""
     sample_episode_maxstep: int = 1000
     """maximum number of steps per sampled episode"""
     batch_size: int = 512
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
+    max_training_steps: int = 2000000
+    """Maximal number of env steps for training"""
 
     # ===============================
     # Evaluation Parameters
