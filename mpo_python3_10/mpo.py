@@ -219,7 +219,7 @@ class MPO(object):
         self.replaybuffer.store_episodes(episodes)
         return total_steps_collected
 
-    def expectation_step(self, state_batch):
+    def expectation_step(self, state_batch, sampled_action = None):
         """
         E-step of MPO:
         - Sample actions from the target policy for each state.
@@ -228,24 +228,34 @@ class MPO(object):
         - Compute normalized weights over actions (norm_target_q).
         """
 
-        K = self.batch_size  # the sample number of states
-        N = self.sample_action_num  # the sample number of actions per state
+        B = self.batch_size  # the sample number of states
+        sample_num = self.sample_action_num  # the sample number of actions per state
 
         with torch.no_grad():
-            # Get mean and Cholesky factor of the target policy for each state
-            b_mu, b_A = self.target_actor.forward(state_batch)  # (K,)
 
-            # Gaussian policy over actions with batch size K
-            b = MultivariateNormal(b_mu, scale_tril=b_A)  # (K,)
+            if sampled_action is None:
+                
+                # Get mean and Cholesky factor of the target policy for each state
+                b_mu, b_A = self.target_actor.forward(state_batch)  # (B,)
 
-            # Sample N actions per state -> shape (N, K, action_dim)
-            sampled_actions = b.sample((N,))  
-            expanded_states = state_batch[None, ...].expand(N, -1, -1)  # (N, K, state_dim)
+                # Gaussian policy over actions with batch size K
+                b = MultivariateNormal(b_mu, scale_tril=b_A)  # (B,)
 
+                # Sample N actions per state -> shape (sample_num, B, action_dim)
+                sampled_actions = b.sample((sample_num,))  
+                
+            else:
+                sampled_actions = sampled_action
+
+                #Check for correct dimensions
+                self.assert_sampled_actions_shape(sampled_actions, state_batch)
+            
+            expanded_states = state_batch[None, ...].expand(sample_num, -1, -1)  # (sample_num, B, state_dim)
+            
             # Evaluate Q-values of the target critic for all (state, action) pairs
             target_q = self.target_critic.forward(
                 expanded_states.reshape(-1, self.state_dim), sampled_actions.reshape(-1, self.action_dim)  # (N * K, action_dim)
-            ).reshape(N, K)
+            ).reshape(sample_num, B)
         
         # Treat target_q as constant w.r.t. eta (no gradients from critic/actor)
         eta_tensor = torch.tensor(self.eta, device=self.device, requires_grad=True)
@@ -260,8 +270,8 @@ class MPO(object):
             self.eta = eta_tensor.item()
         
         # Compute normalized weights over actions for each state
-        # Shape stays (N, K), softmax along action-sample dimension N
-        norm_target_q = torch.softmax(target_q / self.eta, dim=0)  # (N, K) or (action_dim, K)
+        # Shape stays (sample_num, B), softmax along action-sample dimension sample_num
+        norm_target_q = torch.softmax(target_q / self.eta, dim=0)  # (sample_num, B) or (action_dim, B)
 
         return sampled_actions, norm_target_q, b_mu, b_A
     
@@ -273,29 +283,26 @@ class MPO(object):
         under the non-parametric target distribution (defined by norm_target_q).
         - Enforce KL constraints between the new and old policy via Lagrange multipliers.
         """
-        # sampled_actions has shape (N, K, action_dim)
-        N, K, _ = sampled_actions.shape
+        # Check for correct dimensions
+        self.assert_sampled_actions_shape(sampled_actions, state_batch)
 
         # Current actor parameters for this batch of states
         mu, A = self.actor.forward(state_batch)
 
         # paper1 version
-        #policy = MultivariateNormal(loc=mu, scale_tril=A)  # (K,)
-        #loss_p = torch.mean( norm_target_q * policy.expand((N, K)).log_prob(sampled_actions))  # (N, K)
+        #policy = MultivariateNormal(loc=mu, scale_tril=A)  # (B,)
+        #loss_p = torch.mean( norm_target_q * policy.expand((N, K)).log_prob(sampled_actions))  # (N, B)
         #C_mu, C_sigma, sigma_i_det, sigma_det = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
 
         # Two Gaussian policies as in the "paper2" variant:
         # pi_1 uses new mean and old covariance; pi_2 uses old mean and new covariance.
-        pi_1 = MultivariateNormal(loc=mu, scale_tril=b_A)  # (K,)
-        pi_2 = MultivariateNormal(loc=b_mu, scale_tril=A)  # (K,)
+        pi_1 = MultivariateNormal(loc=mu, scale_tril=b_A)  # (B,)
+        pi_2 = MultivariateNormal(loc=b_mu, scale_tril=A)  # (B,)
+        logp1 = pi_1.log_prob(sampled_actions)
+        logp2 = pi_2.log_prob(sampled_actions)
 
         # Weighted policy improvement objective
-        self.loss_p = torch.mean(
-            norm_target_q * (
-                pi_1.expand((N, K)).log_prob(sampled_actions)  # (N, K)
-                + pi_2.expand((N, K)).log_prob(sampled_actions)  # (N, K)
-            )
-        )
+        self.loss_p = torch.mean(norm_target_q * (logp1 + logp2))
 
         # KL constraints between old and new Gaussian policies
         C_mu, C_sigma, _, sigma_det,var_mean, var_min, var_max  = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
@@ -324,6 +331,42 @@ class MPO(object):
         self.var_min.append(var_min.item())
         self.var_max.append(var_max.item())
         self.mean_loss_l.append(self.loss_l.item())
+    
+    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=32):
+        B = state_batch.size(0)
+        sample_num = self.sample_action_num
+        with torch.no_grad():
+
+            ## get mean, cholesky from target actor --> to sample from Gaussian
+            
+            #!concatenation of all steps to perform only one forward pass of action sampling to reduce computional costs!
+            all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
+
+            pi_mean, pi_A = self.target_actor.forward(all_states)  # (2B,)
+            policy = MultivariateNormal(pi_mean, scale_tril=pi_A)  # (2B,)
+
+            all_sampled_actions = policy.sample((sample_num,)).permute(1, 0, 2)  # (2B, sample_num, action_dim)
+            sampled_actions      = all_sampled_actions[:B]  # (B, sample_num, action_dim)
+            sampled_next_actions = all_sampled_actions[B:]  # (B, sample_num, action_dim)
+            
+            # Permute sampled_actions for E-Step:
+            sampled_actions_NBA =  sampled_actions.permute(1, 0,2)    # ( sample_num, B, action_dim)
+
+            expanded_next_states = next_state_batch[:, None, :].expand(-1, sample_num, -1)  # (2B, sample_num, state_dim)
+            
+            ## get expected Q value from target critic
+            expected_next_q = self.target_critic.forward(
+                expanded_next_states.reshape(-1, self.state_dim),  # (B * sample_num, state_dim)
+                sampled_next_actions.reshape(-1, self.action_dim)  # (B * sample_num, action_dim)
+            ).reshape(B, sample_num).mean(dim=1)  # (B,)
+            
+            y = reward_batch + self.gamma * expected_next_q
+        self.critic_optimizer.zero_grad()
+        t = self.critic( state_batch, action_batch).squeeze()
+        loss = self.norm_loss_q(y, t)
+        loss.backward()
+        self.critic_optimizer.step()
+        return loss, t, y, sampled_actions_NBA
 
 
     def train(self, iteration_num=None, render=None, log_callback =None):
@@ -374,24 +417,22 @@ class MPO(object):
                     size=self.batch_size,
                     replace=False  # oder True, wenn du sehr viele Updates machen willst
                 )        
-
-                # Unpack transitions sampled from replay buffer    
-                state_batch, action_batch, next_state_batch, reward_batch = zip(
-                    *[self.replaybuffer[index] for index in indices])
-
-                # Convert to torch tensors on the correct device
-                state_batch      = torch.as_tensor(np.stack(state_batch), dtype=torch.float32, device=self.device)  # [K, dim_obs]
-                action_batch     = torch.as_tensor(np.stack(action_batch), dtype=torch.float32, device=self.device) # [K, dim_act]
-                next_state_batch = torch.as_tensor(np.stack(next_state_batch), dtype=torch.float32, device=self.device) #[K, dim_obs]
-                reward_batch     = torch.as_tensor(np.stack(reward_batch), dtype=torch.float32, device=self.device)     #[K,]
                 
+                # Unpack transitions sampled from replay buffer    
+                s_chunks, a_chunks, ns_chunks, r_chunks = self.replaybuffer.sample_batch(self.batch_size)
+
+                state_batch      = torch.as_tensor(np.concatenate(s_chunks, axis=0), dtype=torch.float32, device=self.device)
+                action_batch     = torch.as_tensor(np.concatenate(a_chunks, axis=0), dtype=torch.float32, device=self.device)
+                next_state_batch = torch.as_tensor(np.concatenate(ns_chunks, axis=0), dtype=torch.float32, device=self.device)
+                reward_batch     = torch.as_tensor(np.concatenate(r_chunks, axis=0), dtype=torch.float32, device=self.device)
+
                 # Policy evaluation (critic update)
                 t_policy_eval_start = time.perf_counter()
 
                 if self.use_retrace:
                     loss_q, Q_current, Q_target = self.critic_update_retrace(state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
                 else:
-                    loss_q, Q_current, Q_target = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
+                    loss_q, Q_current, Q_target, sampled_actions = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
 
                 t_policy_eval_end = time.perf_counter()    
                 self.runtime_policy_eval += t_policy_eval_end - t_policy_eval_start
@@ -469,30 +510,6 @@ class MPO(object):
             t_eval_end = time.perf_counter()
             self.runtime_eval += t_eval_end -t_eval_start     
 
-    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):
-        B = state_batch.size(0)
-        with torch.no_grad():
-
-            ## get mean, cholesky from target actor --> to sample from Gaussian
-            pi_mean, pi_A = self.target_actor.forward(next_state_batch)  # (B,)
-            policy = MultivariateNormal(pi_mean, scale_tril=pi_A)  # (B,)
-            sampled_next_actions = policy.sample((sample_num,)).transpose(0, 1)  # (B, sample_num, action_dim)
-            expanded_next_states = next_state_batch[:, None, :].expand(-1, sample_num, -1)  # (B, sample_num, state_dim)
-            
-            ## get expected Q value from target critic
-            expected_next_q = self.target_critic.forward(
-                expanded_next_states.reshape(-1, self.state_dim),  # (B * sample_num, state_dim)
-                sampled_next_actions.reshape(-1, self.action_dim)  # (B * sample_num, action_dim)
-            ).reshape(B, sample_num).mean(dim=1)  # (B,)
-            
-            y = reward_batch + self.gamma * expected_next_q
-        self.critic_optimizer.zero_grad()
-        t = self.critic( state_batch, action_batch).squeeze()
-        loss = self.norm_loss_q(y, t)
-        loss.backward()
-        self.critic_optimizer.step()
-        return loss, t, y
-
     ## Mistake: need to change buffer for storage of old policies!
     def critic_update_retrace(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):
        
@@ -537,6 +554,30 @@ class MPO(object):
         retrace_weights = log_retrace_weights.exp()
         assert not torch.isnan(log_retrace_weights).any(), "Error, a least one NaN value found in retrace weights."
         return retrace_weights
+    
+    def assert_sampled_actions_shape(self, sampled_actions, state_batch, name="sampled_actions"):
+        """
+        Ensures sampled_actions has shape (N, B, action_dim)
+        where:
+        sample_num = number of sampled actions per state
+        B = state_batch.size(0)
+        action_dim = self.action_dim
+        """
+
+        assert sampled_actions is not None, f"{name} is None"
+        assert sampled_actions.dim() == 3, \
+            f"{name} must be 3D (sample_num, B, act_dim), got shape {tuple(sampled_actions.shape)}"
+
+        N, B, A = sampled_actions.shape
+        expected_B = state_batch.size(0)
+
+        assert N == self.sample_action_num, \
+            f"{name}: Expected N={self.sample_action_num} actions per state, got N={N}"
+        assert B == expected_B, \
+            f"{name}: Expected B={expected_B} states, got K={B}"
+        assert A == self.action_dim, \
+            f"{name}: Expected action_dim={self.action_dim}, got A={A}"
+
     
     def evaluate(self):
         """
