@@ -232,7 +232,7 @@ class MPO(object):
         self.replaybuffer.store_episodes(episodes)
         return total_steps_collected
 
-    def expectation_step(self, state_batch, sampled_action = None):
+    def expectation_step(self, state_batch, sampled_action = None, b_mu = None, b_A= None):
         """
         E-step of MPO:
         - Sample actions from the target policy for each state.
@@ -374,7 +374,8 @@ class MPO(object):
             all_sampled_actions = policy.sample((sample_num,)).permute(1, 0, 2)  # (2B, sample_num, action_dim)
             sampled_actions      = all_sampled_actions[:B]  # (B, sample_num, action_dim)
             sampled_next_actions = all_sampled_actions[B:]  # (B, sample_num, action_dim)
-            
+            b_mu = pi_mean[:B]
+            b_A =pi_A[:B]
             # Permute sampled_actions for E-Step:
             sampled_actions_NBA =  sampled_actions.permute(1, 0,2)    # ( sample_num, B, action_dim)
 
@@ -392,7 +393,7 @@ class MPO(object):
         loss = self.norm_loss_q(y, t)
         loss.backward()
         self.critic_optimizer.step()
-        return loss, t, y, sampled_actions_NBA
+        return loss, t, y, sampled_actions_NBA, b_mu, b_A
 
 
     def train(self, iteration_num=None, render=None, log_callback =None):
@@ -470,7 +471,7 @@ class MPO(object):
                 if self.use_retrace:
                     loss_q, Q_current, Q_target = self.critic_update_retrace(state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
                 else:
-                    loss_q, Q_current, Q_target, sampled_actions = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
+                    loss_q, Q_current, Q_target, sampled_actions, b_mu, b_A = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
 
                 t_policy_eval_end = time.perf_counter()    
                 self.runtime_policy_eval += t_policy_eval_end - t_policy_eval_start
@@ -483,7 +484,7 @@ class MPO(object):
                 if r % self.delay_policy_update == 0:
                     # E-step (build non-parametric target distribution)
                     t_E_step_start = time.perf_counter()
-                    sampled_actions, norm_target_q, b_mu, b_A = self.expectation_step(state_batch)
+                    sampled_actions, norm_target_q, b_mu, b_A = self.expectation_step(state_batch, sampled_actions, b_mu, b_A)
                     t_E_step_end = time.perf_counter()         
                     self.runtime_E_step += t_E_step_end - t_E_step_start
 
