@@ -39,6 +39,8 @@ class Args:
     "number of global updates per log to wandb"
     num_threads: int = 16  
     """number of threads to use"""
+    use_compile: bool = True
+    """Flag for use of compiled version of actor and critic"""
 
     # ===============================
     # MPO Algorithm Parameters
@@ -59,7 +61,8 @@ class Args:
     """hidden size of critc network"""
     use_retrace: bool = False
     """True for use of retrace, false for TD approach"""
-
+    covariance_type: str = 'diag'
+    """enter diag or "full" for covariance matrix structur"""
     mstep_iteration_num: int = 5
     """number of gradient updates in the M-step"""
     learning_rate: float = 1e-4
@@ -68,9 +71,9 @@ class Args:
     "Learning rate for dual function"
     dual_constraint: float = 0.1
     """hard constraint of the dual formulation in the E-step"""
-    kl_mean_constraint: float = 0.005   
+    kl_mean_constraint: float = 0.001   
     """hard constraint of the mean in the M-step"""
-    kl_var_constraint: float = 0.0001        
+    kl_var_constraint: float = 0.00001        
     """hard constraint of the covariance in the M-step"""
     alpha_mean_scale: float = 1.0
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
@@ -92,6 +95,10 @@ class Args:
     """number of warm-up steps for the buffer"""
     delay_policy_update: int = 1
     """number of critic updates per policy update"""
+    init_eta_mu: float = 0.05
+    """int value of eta mu"""
+    init_eta_sigma: float = 1
+    """ init value of eta sigma"""
 
     # ===============================
     # Sampling / Replay Buffer
@@ -140,7 +147,6 @@ def log_callback(logs):
     # --- TensorBoard ---
     for key in [
         "iteration",
-        "num_steps",
         "global_update",
         "mean_return_buffer",
         "mean_reward_buffer",
@@ -157,13 +163,19 @@ def log_callback(logs):
         "runtime_E_step",
         "max_kl_sigma",
         "mean_sigma_det",
-        "eta_mu",
-        "eta_sigma",
+        "eta_mu_mean",
+        "eta_mu_max",
+        "eta_mu_min",
+        "eta_sigma_mean",
+        "eta_sigma_max",
+        "eta_sigma_min",
         "return_eval",
         "var_mean",
         "var_min",
         "var_max"
-        "buffer_size"
+        "buffer_size",
+        "min_kl_sigma",
+        "min_kl_mu"
     ]:
         if key in logs:
             tag = key.replace("_", "/") if key.startswith("eval_") else key

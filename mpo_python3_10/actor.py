@@ -7,13 +7,14 @@ class Actor(nn.Module):
     
     #Policy network
     
-    def __init__(self, env, hidden_size_actor, std_init):
+    def __init__(self, env, hidden_size_actor, std_init,covariance_type="diag"):
         super(Actor, self).__init__()
         self.env = env
         self.ds = env.observation_space.shape[0]
         self.da = env.action_space.shape[0]
         self.hs= hidden_size_actor
         self._printed_init_cov = False
+        self.covariance_type = covariance_type
         
 
         self.backbone = nn.Sequential(
@@ -26,22 +27,30 @@ class Actor(nn.Module):
 
         # zwei getrennte Köpfe
         self.mean_layer = nn.Linear(self.hs, self.da)
-        self.cholesky_layer = nn.Linear(self.hs, (self.da * (self.da + 1)) // 2)
-        
-        with torch.no_grad():
-            # all weiths to zero
-            self.cholesky_layer.weight.zero_()
-            self.cholesky_layer.bias.zero_()
+      
+        # inverse Softplus helper
+        def softplus_inv(y):
+            return torch.log(torch.exp(torch.tensor(y)) - 1.0)
 
-            # inverse Softplus:
-            def softplus_inv(y):
-                return torch.log(torch.exp(torch.tensor(y)) - 1.0)
+        if self.covariance_type == "full":
+            self.cholesky_layer = nn.Linear(self.hs, (self.da * (self.da + 1)) // 2)
 
-            diag_indices = torch.arange(self.da, dtype=torch.long)
-            diag_indices = (diag_indices + 1) * (diag_indices + 2) // 2 - 1
+            with torch.no_grad():
+                self.cholesky_layer.weight.zero_()
+                self.cholesky_layer.bias.zero_()
 
-            # Bias so setzen, dass softplus(bias) = std_init
-            self.cholesky_layer.bias[diag_indices] = softplus_inv(std_init)
+                diag_indices = torch.arange(self.da, dtype=torch.long)
+                diag_indices = (diag_indices + 1) * (diag_indices + 2) // 2 - 1
+                self.cholesky_layer.bias[diag_indices] = softplus_inv(std_init)
+
+        elif self.covariance_type == "diag":
+            # wir lernen nur die Standardabweichungen
+            self.std_layer = nn.Linear(self.hs, self.da)
+            with torch.no_grad():
+                self.std_layer.weight.zero_()
+                self.std_layer.bias.fill_(softplus_inv(std_init))
+        else:
+            raise ValueError(f"Unknown covariance_type: {self.covariance_type}")
 
 
     def forward(self, state):
@@ -59,25 +68,30 @@ class Actor(nn.Module):
         
         #Mean Kopf
         mean = self.mean_layer(x)   # (B, da)
-    
-        # Cholesky-Kopf
-        cholesky_vector = self.cholesky_layer(x)   # (B, da*(da+1)//2)
+        
+        if self.covariance_type == "diag":
+            std = F.softplus(self.std_layer(x))          # (B, da)
+            cholesky = torch.diag_embed(std) 
+        else:
+            # Cholesky-Kopf
+            # Attention! Not working right now!!
+            cholesky_vector = self.cholesky_layer(x)   # (B, da*(da+1)//2)
 
-        cholesky_diag_index = torch.arange(da, dtype=torch.long, device=device) + 1
-        cholesky_diag_index = (cholesky_diag_index * (cholesky_diag_index + 1)) // 2 - 1
-        cholesky_vector[:, cholesky_diag_index] = F.softplus(
-            cholesky_vector[:, cholesky_diag_index]
-        )
+            cholesky_diag_index = torch.arange(da, dtype=torch.long, device=device) + 1
+            cholesky_diag_index = (cholesky_diag_index * (cholesky_diag_index + 1)) // 2 - 1
+            cholesky_vector[:, cholesky_diag_index] = F.softplus(
+                cholesky_vector[:, cholesky_diag_index]
+            )
 
-        tril_indices = torch.tril_indices(row=da, col=da, offset=0, device=device)
-        cholesky = torch.zeros(size=(B, da, da), dtype=torch.float32, device=device)
-        cholesky[:, tril_indices[0], tril_indices[1]] = cholesky_vector
+            tril_indices = torch.tril_indices(row=da, col=da, offset=0, device=device)
+            cholesky = torch.zeros(size=(B, da, da), dtype=torch.float32, device=device)
+            cholesky[:, tril_indices[0], tril_indices[1]] = cholesky_vector
 
         #Debug: Print variance
         if not self._printed_init_cov:
             with torch.no_grad():
-                Sigma = cholesky @ cholesky.transpose(-1, -2)   # Covariance
-                diag_vars = torch.diagonal(Sigma, dim1=-2, dim2=-1)[0]  # erste Batch-Zeile
+                std0 = torch.diagonal(cholesky, dim1=-2, dim2=-1)[0]  # (da,)
+                diag_vars = (std0 ** 2)
                 print("🔍 Initial diagonal variances:", diag_vars.cpu().numpy())
             self._printed_init_cov = True
 

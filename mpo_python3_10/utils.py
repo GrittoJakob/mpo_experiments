@@ -45,6 +45,45 @@ def gaussian_kl(mu_i, mu, Ai, A):
     var_max  = var_diag.max()          # maximum variance
     return C_mu, C_sigma, torch.mean(sigma_i_det), torch.mean(sigma_det), var_mean, var_min, var_max
 
+
+def gaussian_kl_diag(mu_i, mu, Ai, A, eps=1e-8):
+    """
+    mu_i, mu: (B, da)
+    Ai, A: Cholesky-Faktoren (B, da, da) - diagonal 
+    Returns:
+        C_mu_dim_mean: (da,)  mean-KL pro Dim über Batch gemittelt
+        C_sigma_dim_mean: (da,) var-KL pro Dim über Batch gemittelt
+        C_mu_scalar, C_sigma_scalar optional
+    """
+    if Ai.dim() == 3:
+        std_i = torch.diagonal(Ai, dim1=-2, dim2=-1)
+    else:
+        std_i = Ai
+
+    if A.dim() == 3:
+        std = torch.diagonal(A, dim1=-2, dim2=-1)
+    else:
+        std = A
+
+    var_i = std_i**2
+    var   = std**2
+
+    # Mean-KL pro Dim
+    C_mu_dim = 0.5 * ((mu - mu_i)**2) / (var_i + eps)  # (B, da)
+
+    # Var-KL pro Dim
+    C_sigma_dim = 0.5 * ( (var_i / (var + eps)) - 1.0 + torch.log((var + eps) / (var_i + eps)) )
+
+    # Batch-Mittel -> pro Dim
+    C_mu_dim_mean = C_mu_dim.mean(dim=0)         # (da,)
+    C_sigma_dim_mean = C_sigma_dim.mean(dim=0)  # (da,)
+
+    # Optional: wieder Skalar wie vorher
+    C_mu_scalar = C_mu_dim_mean.sum()
+    C_sigma_scalar = C_sigma_dim_mean.sum()
+
+    return C_mu_dim_mean, C_sigma_dim_mean, C_mu_scalar, C_sigma_scalar
+
 def limit_threads(n: int):
     # PyTorch threads
     torch.set_num_threads(n)

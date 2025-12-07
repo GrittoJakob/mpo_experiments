@@ -8,14 +8,14 @@ import torch
 import gymnasium as gym
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
-from torch.distributions import MultivariateNormal
+from torch.distributions import MultivariateNormal, Independent, Normal
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from actor import Actor
 from critic import Critic
 from replaybuffer import ReplayBuffer
 import time
 import math
-from utils import btr,  bt, gaussian_kl
+from utils import gaussian_kl, gaussian_kl_diag
         
 class MPO(object):
     def __init__(self, env, args):
@@ -37,9 +37,9 @@ class MPO(object):
 
         # MPO / optimization hyperparameters
         # Dual / KL constraints
-        self.eps_dual = args.dual_constraint      # KL constraint for E-Step
-        self.eps_mu = args.kl_mean_constraint     # KL constraint for mean
-        self.eps_gamma = args.kl_var_constraint   # KL constraint for variance
+        self.eps_dual = args.dual_constraint     # KL constraint for E-Step
+        self.eps_mu_dim = torch.full((self.action_dim,), args.kl_mean_constraint, device = self.device, dtype=torch.float32)     # KL constraint for mean
+        self.eps_gamma_dim = torch.full((self.action_dim,), args.kl_var_constraint, device = self.device, dtype=torch.float32)   # KL constraint for variance
 
         # Discount factor for returns
         self.gamma = args.discount_factor
@@ -98,14 +98,23 @@ class MPO(object):
         # Policy / value networks and their targets
         self.std_init = args.std_init             # initial std for Gaussian policy
         self.use_retrace = args.use_retrace       # whether to use Retrace for critic update
+        self.covariance_type = args.covariance_type
 
         # Main actor / critic networks
-        self.actor = Actor(env, args.hidden_size_actor, self.std_init).to(self.device)
+        self.actor = Actor(env, args.hidden_size_actor, self.std_init, self.covariance_type).to(self.device)
         self.critic = Critic(env, args.hidden_size_critic).to(self.device)
 
         # Target networks (used for stable targets)
-        self.target_actor = Actor(env, args.hidden_size_actor, self.std_init).to(self.device)
+        self.target_actor = Actor(env, args.hidden_size_actor, self.std_init, self.covariance_type).to(self.device)
         self.target_critic = Critic(env, args.hidden_size_critic).to(self.device)
+
+        # Optional compile (PyTorch 2.x)
+        if getattr(args, "use_compile", False):
+            self.actor = torch.compile(self.actor)
+            self.critic = torch.compile(self.critic)
+            self.target_actor = torch.compile(self.target_actor)
+            self.target_critic = torch.compile(self.target_critic)
+
 
         # How often to sync target networks with the main networks (in gradient updates)
         self.target_update_period = args.target_update_period
@@ -137,8 +146,8 @@ class MPO(object):
         self.eta = np.random.rand()
 
         # Lagrange multipliers for KL constraints in the M-step
-        self.eta_mu = 0.0      # for mean KL constraint
-        self.eta_sigma = 0.0   # for variance KL constraint
+        self.eta_mu = torch.full((self.action_dim,), args.init_eta_mu, device=self.device,dtype=torch.float32)
+        self.eta_sigma = torch.full((self.action_dim,), args.init_eta_sigma, device=self.device, dtype=torch.float32)
 
         # Global step / iteration bookkeeping
         self.num_steps = 0
@@ -161,7 +170,8 @@ class MPO(object):
         # KL and covariance statistics
         self.max_kl_mu = []
         self.max_kl_sigma = []
-        self.mean_sigma_det = []
+        self.min_kl_sigma  =[]
+        self.min_kl_mu = []
 
         # Variance statistics
         self.var_mean = []
@@ -217,7 +227,7 @@ class MPO(object):
                 episodes.append(buff)
 
         self.actor.train()
-        
+
         # Push all collected episodes into the replay buffer and returns the number of collected steps
         self.replaybuffer.store_episodes(episodes)
         return total_steps_collected
@@ -299,37 +309,50 @@ class MPO(object):
 
         # Two Gaussian policies as in the "paper2" variant:
         # pi_1 uses new mean and old covariance; pi_2 uses old mean and new covariance.
-        pi_1 = MultivariateNormal(loc=mu, scale_tril=b_A)  # (B,)
-        pi_2 = MultivariateNormal(loc=b_mu, scale_tril=A)  # (B,)
+
+        b_std = torch.diagonal(b_A, dim1=-2, dim2=-1)  # (B, da)
+        std   = torch.diagonal(A,  dim1=-2, dim2=-1)  # (B, da)
+
+        pi_1 = Independent(Normal(mu, b_std), 1)
+        pi_2 = Independent(Normal(b_mu, std), 1)
         logp1 = pi_1.log_prob(sampled_actions)
         logp2 = pi_2.log_prob(sampled_actions)
+
+        # Logging of variances
+        var = A.pow(2)  # (B, da)
+        var_mean = var.mean()     # Skalar
+        var_min  = var.min()      # Skalar
+        var_max  = var.max()      # Skalar
 
         # Weighted policy improvement objective
         self.loss_p = torch.mean(norm_target_q * (logp1 + logp2))
 
         # KL constraints between old and new Gaussian policies
-        C_mu, C_sigma, _, sigma_det,var_mean, var_min, var_max  = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
+        C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(b_mu, mu, b_A, A)
 
-        # Update lagrange multipliers by gradient descent
-        self.eta_mu -= self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
-        self.eta_sigma -= self.alpha_sigma_scale * (self.eps_gamma - C_sigma).detach().item()
+        with torch.no_grad():
 
-        # Clamp Lagrange multipliers to a reasonable range
-        self.eta_mu = np.clip(self.eta_mu, 1e-10, self.alpha_mu_max)
-        self.eta_sigma = np.clip(self.eta_sigma, 1e-10, self.alpha_sigma_max)
+            # Update lagrange multipliers by gradient descent
+            self.eta_mu -= self.alpha_mu_scale * (self.eps_mu_dim - C_mu_dim)
+            self.eta_sigma -= self.alpha_sigma_scale * (self.eps_gamma_dim - C_sigma_dim)
+
+            # Clamp Lagrange multipliers to a reasonable range
+            self.eta_mu.clamp_(1e-10, self.alpha_mu_max)
+            self.eta_sigma.clamp_(1e-10, self.alpha_sigma_max)
 
         # Total actor loss: maximize weighted log-prob subject to KL constraints
         self.actor_optimizer.zero_grad()
-        self.loss_l = -( self.loss_p + self.eta_mu * (self.eps_mu - C_mu) + self.eta_sigma * (self.eps_gamma - C_sigma))
+        self.loss_l = -( self.loss_p + (self.eta_mu * (self.eps_mu_dim - C_mu_dim)).sum() + (self.eta_sigma * (self.eps_gamma_dim - C_sigma_dim)).sum())
         self.loss_l.backward()
         clip_grad_norm_(self.actor.parameters(), 0.1)
         self.actor_optimizer.step() 
 
         # Logging statistics for analysis/monitoring
         self.mean_loss_p.append((-self.loss_p).item())
-        self.max_kl_mu.append(C_mu.item())
-        self.max_kl_sigma.append(C_sigma.item())
-        self.mean_sigma_det.append(sigma_det.item())
+        self.max_kl_mu.append(C_mu_dim.max().item())
+        self.max_kl_sigma.append(C_sigma_dim.max().item())
+        self.min_kl_mu.append(C_mu_dim.min().item())
+        self.min_kl_sigma.append(C_sigma_dim.min().item())
         self.var_mean.append(var_mean.item())
         self.var_min.append(var_min.item())
         self.var_max.append(var_max.item())
@@ -380,11 +403,11 @@ class MPO(object):
         - Runs MPO E-step and M-step (policy improvement).
         - Periodically evaluates and logs statistics.
         """
-        print(f"[DEBUG] start_iteration = {self.start_iteration}, iteration_num = {iteration_num}")
-        
+
         self.render = render
         max_training_steps = self.max_training_steps
         num_steps = 0
+        print(f"[DEBUG] start with number of steps = {len(self.replaybuffer)}, maximal number of environment steps: {self.max_training_steps}")       
 
         # Buffer size for warm up
         self.buffer_size = len(self.replaybuffer)
@@ -675,7 +698,7 @@ class MPO(object):
         with torch.serialization.safe_globals([np.core.multiarray.scalar]):
             checkpoint = torch.load(load_path, weights_only=False)
   
-        self.start_iteration = checkpoint['iteration'] + 1
+       
         self.critic.load_state_dict(checkpoint['critic'])
         self.target_critic.load_state_dict(checkpoint['target_critic'])
         self.actor.load_state_dict(checkpoint['actor'])
@@ -776,9 +799,10 @@ class MPO(object):
         # KL diagnostics
         self.max_kl_mu.clear()
         self.max_kl_sigma.clear()
+        self.max_kl_mu.clear()
+        self.max_kl_sigma.clear()
 
         # Covariance/variance diagnostics
-        self.mean_sigma_det.clear()
         self.var_mean.clear()
         self.var_min.clear()
         self.var_max.clear()
@@ -788,8 +812,16 @@ class MPO(object):
         Build a dictionary with all training statistics for logging.
         Keeps the train() function clean.
         """
+        eta_sigma_mean = float(self.eta_sigma.mean().item()) if torch.is_tensor(self.eta_sigma) else float(np.mean(self.eta_sigma))
+        eta_sigma_max  = float(self.eta_sigma.max().item())  if torch.is_tensor(self.eta_sigma) else float(np.max(self.eta_sigma))
+        eta_sigma_min  = float(self.eta_sigma.min().item())  if torch.is_tensor(self.eta_sigma) else float(np.min(self.eta_sigma))
+        
+        eta_mu_mean = float(self.eta_mu.mean().item()) if torch.is_tensor(self.eta_mu) else float(np.mean(self.eta_mu))
+        eta_mu_max  = float(self.eta_mu.max().item())  if torch.is_tensor(self.eta_mu) else float(np.max(self.eta_mu))
+        eta_mu_min  = float(self.eta_mu.min().item())  if torch.is_tensor(self.eta_mu) else float(np.min(self.eta_mu))
+
+
         return {
-            "num_steps": self.num_steps,
             "global_update": self.global_update,
             "mean_return_buffer": self.mean_return_buffer,
             "mean_reward_buffer": self.mean_reward_buffer,
@@ -809,14 +841,18 @@ class MPO(object):
             "runtime_E_step": self.runtime_E_step,
 
             # MPO-specific parameters
-            "eta": self.eta,
-            "eta_mu": self.eta_mu,
-            "eta_sigma": self.eta_sigma,
+            "eta_mu_mean": eta_mu_mean,
+            "eta_mu_max": eta_mu_max,
+            "eta_mu_min": eta_mu_min,
+            "eta_sigma_mean": eta_sigma_mean,
+            "eta_sigma_max": eta_sigma_max,
+            "eta_sigma_min": eta_sigma_min,
 
-            # KL + variance diagnostics
+            # KL + variance diagnostics          
             "max_kl_mu": np.mean(self.max_kl_mu) if self.max_kl_mu else 0.0,
             "max_kl_sigma": np.mean(self.max_kl_sigma) if self.max_kl_sigma else 0.0,
-            "mean_sigma_det": np.mean(self.mean_sigma_det) if self.mean_sigma_det else 0.0,
+            "min_kl_sigma": np.mean(self.min_kl_sigma) if self.min_kl_sigma else 0.0,
+            "min_kl_mu": np.mean(self.min_kl_mu) if self.min_kl_mu else 0.0,
             "var_mean": np.mean(self.var_mean) if self.var_mean else 0.0,
             "var_min": np.mean(self.var_min) if self.var_min else 0.0,
             "var_max": np.mean(self.var_max) if self.var_max else 0.0,
