@@ -319,7 +319,7 @@ class MPO(object):
         logp2 = pi_2.log_prob(sampled_actions)
 
         # Logging of variances
-        var = A.pow(2)  # (B, da)
+        var = std.pow(2)  # (B, da)
         var_mean = var.mean()     # Skalar
         var_min  = var.min()      # Skalar
         var_max  = var.max()      # Skalar
