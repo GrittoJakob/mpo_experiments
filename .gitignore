@@ -1,8 +1,10 @@
 __pycache__/
 *.pyc
 
-mpo_python3_10/wandb/
-mpo_python3_10/videos/
-mpo_python3_10/mpo_logs/
+mpo_baseline/wandb/
+mpo_baseline/videos/
+mpo_baseline/mpo_logs/
+mpo_logs
+videos
+wandb
 
-mpo_python3_7/

@@ -96,16 +96,20 @@ def limit_threads(n: int):
     os.environ["NUMEXPR_NUM_THREADS"] = str(n)
 
 
-def make_env(env_id, capture_video, run_name):
+def make_env(env_id, capture_video, run_name, name_prefix="rollout"):
     if capture_video:
         env = gym.make(env_id, render_mode="rgb_array")
-        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+
+        # in dieser (frisch erzeugten) video-env: genau Episode 0 aufnehmen
+        env = gym.wrappers.RecordVideo(
+            env,
+            f"videos/{run_name}",
+            name_prefix=name_prefix,
+            episode_trigger=lambda ep: ep == 0,
+        )
     else:
         env = gym.make(env_id)
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.ClipAction(env)
     return env
-
-
-    

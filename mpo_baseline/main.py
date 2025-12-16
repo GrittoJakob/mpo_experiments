@@ -33,20 +33,22 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_inner_interval: int = 50
     "number of global updates per log to wandb"
     num_threads: int = 16  
     """number of threads to use"""
-    use_compile: bool = True
+    use_compile: bool = False
     """Flag for use of compiled version of actor and critic"""
+    video_dir: str = "videos"
+    """where RecordVideo writes mp4s"""
+    log_videos_period: int = 5
+    """iterations per logging exactly one episode video"""
 
     # ===============================
     # MPO Algorithm Parameters
     # ===============================
-    iteration_num: int = 100
-    """number of outer MPO iterations"""
     sample_action_num: int = 20
     """number of action samples per state for E-step weighting"""
     target_update_period: int = 200
@@ -63,8 +65,6 @@ class Args:
     """True for use of retrace, false for TD approach"""
     covariance_type: str = 'diag'
     """enter diag or "full" for covariance matrix structur"""
-    mstep_iteration_num: int = 5
-    """number of gradient updates in the M-step"""
     learning_rate: float = 1e-4
     """Learning rate for Adam optimizer"""
     eta_lr : float = 1e-2
@@ -212,6 +212,8 @@ if __name__ == "__main__":
     env = make_env(args.env_id, args.capture_video, run_name)
     assert isinstance(env.action_space, gym.spaces.Box)
     
+    def make_video_env(name_prefix: str):
+        return make_env(args.env_id, True, run_name, name_prefix=name_prefix)
 
     # Seeding 
     random.seed(args.seed)
@@ -237,17 +239,15 @@ if __name__ == "__main__":
             save_code=True,
         )
 
-    
+    args.run_name = run_name
     # MPO initialisieren
-    Agent = MPO(env, args)   
+    Agent = MPO(env, args, make_video_env = make_video_env)   
 
     if args.load is not None:
         Agent.load_model(args.load)
 
 
     all_logs = Agent.train(
-        iteration_num=args.iteration_num,
-        render=args.render,
         log_callback = log_callback
     )
     

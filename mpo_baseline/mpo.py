@@ -14,11 +14,13 @@ from actor import Actor
 from critic import Critic
 from replaybuffer import ReplayBuffer
 import time
+import glob
+import wandb
 import math
 from utils import gaussian_kl, gaussian_kl_diag
         
 class MPO(object):
-    def __init__(self, env, args):
+    def __init__(self, env, args, make_video_env):
         """
         Main class implementing the MPO agent.
         Holds:
@@ -154,8 +156,13 @@ class MPO(object):
         self.start_iteration = 1
         self.global_update = 1
         
-        # Rendering flag for evaluation (not used during training rollouts)
+        # Vidoes 
+        self.run_name = getattr(args, "run_name", "")
         self.render = args.render
+        self.make_video_env = make_video_env
+        self.video_dir = getattr(args, "video_dir", "videos")
+        self.log_videos_period = args.log_videos_period
+        self._video_cleaned_once = False
 
         # 9) Logging buffers (stats accumulated between log calls)
         # Critic-related statistics
@@ -396,7 +403,7 @@ class MPO(object):
         return loss, t, y, sampled_actions_NBA, b_mu, b_A
 
 
-    def train(self, iteration_num=None, render=None, log_callback =None):
+    def train(self, log_callback =None):
         """
         Main training loop for MPO.
         - Collects experience from the environment.
@@ -405,7 +412,6 @@ class MPO(object):
         - Periodically evaluates and logs statistics.
         """
 
-        self.render = render
         max_training_steps = self.max_training_steps
         num_steps = 0
         print(f"[DEBUG] start with number of steps = {len(self.replaybuffer)}, maximal number of environment steps: {self.max_training_steps}")       
@@ -434,6 +440,10 @@ class MPO(object):
 
             #Update current steps for while loop
             num_steps += new_steps
+            
+            if self.wandb_track and it % self.log_videos_period == 0:
+                prefix = f"rollout_gu{self.global_update}"
+                self._log_one_episode_video(name_prefix=prefix)
 
             # For terminal logging
             pbar.update(new_steps)
@@ -694,6 +704,53 @@ class MPO(object):
         return dual_value
 
 
+
+    def _log_one_episode_video(self, name_prefix: str):
+        if self.make_video_env is None:
+            return
+
+        venv = self.make_video_env(name_prefix=name_prefix)
+        try:
+            # eine Episode deterministic laufen lassen
+            self.actor.eval()
+            state, _ = venv.reset()
+            done = False
+            steps = 0
+            total_reward = 0.0
+            with torch.no_grad():
+                while not done and steps < self.evaluate_episode_maxstep:
+                    st = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+                    action = self.actor.action(st, deterministic=True)
+                    state, reward, terminated, truncated, _ = venv.step(action)
+                    done = terminated or truncated
+                    total_reward += float(reward)
+                    steps += 1
+            self.actor.train()
+
+            
+        finally:
+            venv.close()
+
+        video_folder = os.path.join(self.video_dir, self.run_name)  # videos/<run_name>
+        mp4s = sorted(glob.glob(os.path.join(video_folder, "*.mp4")), key=os.path.getmtime)
+
+        if not mp4s:
+            return
+        latest = mp4s[-1]
+
+        wandb.log(
+            {
+                "rollout/video": wandb.Video(latest, format="mp4"),
+                "rollout/video_return": total_reward,
+                "rollout/video_len": steps,
+            },
+            step=self.global_update,
+        )
+
+        # optional: clean up
+        os.remove(latest)
+
+
     def load_model(self, path=None):
         load_path = path if path is not None else self.save_path
         with torch.serialization.safe_globals([np.core.multiarray.scalar]):
@@ -858,214 +915,3 @@ class MPO(object):
             "var_min": np.mean(self.var_min) if self.var_min else 0.0,
             "var_max": np.mean(self.var_max) if self.var_max else 0.0,
         }
-
-"""
-!!! OLD training function !!!
-
-def train(self, iteration_num=None, render=None, log_callback =None):
-        print(f"[DEBUG] start_iteration = {self.start_iteration}, iteration_num = {iteration_num}")
-        self.render = render
-        global_update = 1
-        env_runtime = 0
-        train_runtime = 0
-        eval_runtime = 0
-        runtime_policy_eval = 0
-        runtime_E_step = 0
-        runtime_M_step = 0
-        #writer = SummaryWriter(os.path.join(log_dir, 'tb'))
-
-        for it in tqdm(range(self.start_iteration, iteration_num + 1), desc="Training iterations") :
-            
-            t_env_start = time.perf_counter()
-            self.sample_trajectory(self.sample_episode_num)
-            t_env_end = time.perf_counter()
-            env_runtime += t_env_end - t_env_start
-
-            t_train_start = time.perf_counter()
-            buffer_size = len(self.replaybuffer)
-
-            mean_reward_buffer = self.replaybuffer.mean_reward()
-            mean_return_buffer = self.replaybuffer.mean_return()
-
-            if buffer_size < self.batch_size:
-
-                print(f"[MPO] Buffer warmup: {buffer_size} < batch_size={self.batch_size}, skip updates")
-
-            else:
-
-                for r in range(self.num_updates_per_iter):
-                    
-                    indices = np.random.choice(
-                        buffer_size,
-                        size=self.batch_size,
-                        replace=False  # oder True, wenn du sehr viele Updates machen willst
-                    )
-                        
-           
-
-                    state_batch, action_batch, next_state_batch, reward_batch = zip(
-                        *[self.replaybuffer[index] for index in indices])
-
-                    state_batch      = torch.as_tensor(np.stack(state_batch), dtype=torch.float32, device=self.device)  # [K, dim_obs]
-                    action_batch     = torch.as_tensor(np.stack(action_batch), dtype=torch.float32, device=self.device) # [K, dim_act]
-                    next_state_batch = torch.as_tensor(np.stack(next_state_batch), dtype=torch.float32, device=self.device) #[K, dim_obs]
-                    reward_batch     = torch.as_tensor(np.stack(reward_batch), dtype=torch.float32, device=self.device)     #[K,]
-
-                    t_policy_eval_start = time.perf_counter()
-                    # Policy Evaluation
-                    if self.use_retrace:
-                        loss_q, current_q, Q_target = self.critic_update_retrace(state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
-                    else:
-                        loss_q, current_q, Q_target = self.critic_update_td( state_batch, action_batch, next_state_batch, reward_batch, self.sample_action_num)
-
-                    t_policy_eval_end = time.perf_counter()    
-                    runtime_policy_eval += t_policy_eval_end - t_policy_eval_start
-                    self.q_update_step += 1
-                    self.mean_loss_q.append(loss_q.item())
-                    self.mean_current_q.append(current_q.abs().mean().item())
-                    self.mean_target_q.append(Q_target.abs().mean().item())
-                    
-                    t_E_step_start = time.perf_counter()        #Timer
-                    # E-Step of Policy Improvement
-                    with torch.no_grad():
-                        # sample N actions per state
-                        b_mu, b_A = self.target_actor.forward(state_batch)  # (K,)
-                        b = MultivariateNormal(b_mu, scale_tril=b_A)  # (K,)
-                        sampled_actions = b.sample((N,))  # (N, K, action_dim)
-                        expanded_states = state_batch[None, ...].expand(N, -1, -1)  # (N, K, state_dim)
-                        target_q = self.target_critic.forward(
-                            expanded_states.reshape(-1, self.state_dim), sampled_actions.reshape(-1, self.action_dim)  # (N * K, action_dim)
-                        ).reshape(N, K)
-                        target_q = target_q.cpu().transpose(0, 1).numpy()  # (K, N)
-                        
-                    
-                    if r % self.update_dual_function_interval == 0:  
-                        eta_tensor = torch.tensor(self.eta, device=self.device, requires_grad=True)
-                        dual_val = self.dual_function(eta_tensor, target_q.detach(), self.eps_daul)
-                        dual_val.backward()
-                        with torch.no_grad():
-                            eta_tensor -= self.eta_lr * eta_tensor.grad
-                            eta_tensor.clamp_(min=1e-6)
-                            self.eta = eta_tensor.item()
-                    # normalize
-                    norm_target_q = torch.softmax(target_q / self.eta, dim=0)  # (N, K) or (action_dim, K)
-
-                    t_E_step_end = time.perf_counter()         #Counter
-                    runtime_E_step += t_E_step_end - t_E_step_start
-
-                    t_M_step_start = time.perf_counter() 
-                    # M-Step of Policy Improvement
-                    for _ in range(self.mstep_iteration_num):
-                        mu, A = self.actor.forward(state_batch)
-
-                        # paper1 version
-                        #policy = MultivariateNormal(loc=mu, scale_tril=A)  # (K,)
-                        #loss_p = torch.mean( norm_target_q * policy.expand((N, K)).log_prob(sampled_actions))  # (N, K)
-                        #C_mu, C_sigma, sigma_i_det, sigma_det = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
-
-                        # paper2 version normalize
-                        pi_1 = MultivariateNormal(loc=mu, scale_tril=b_A)  # (K,)
-                        pi_2 = MultivariateNormal(loc=b_mu, scale_tril=A)  # (K,)
-                        self.loss_p = torch.mean(
-                            norm_target_q * (
-                                pi_1.expand((N, K)).log_prob(sampled_actions)  # (N, K)
-                                + pi_2.expand((N, K)).log_prob(sampled_actions)  # (N, K)
-                            )
-                        )
-                        C_mu, C_sigma, sigma_i_det, sigma_det,var_mean, var_min, var_max  = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
-                        
-                        self.mean_loss_p.append((-self.loss_p).item())
-                        self.max_kl_mu.append(C_mu.item())
-                        self.max_kl_sigma.append(C_sigma.item())
-                        self.mean_sigma_det.append(sigma_det.item())
-                        self.var_mean.append(var_mean.item())
-                        self.var_min.append(var_min.item())
-                        self.var_max.append(var_max.item())
-
-                        # Update lagrange multipliers by gradient descent
-                    
-                        self.eta_mu -= self.alpha_mu_scale * (self.eps_mu - C_mu).detach().item()
-                        self.eta_sigma -= self.alpha_sigma_scale * (self.eps_gamma - C_sigma).detach().item()
-
-                        self.eta_mu = np.clip(self.eta_mu, 1e-10, self.alpha_mu_max)
-                        self.eta_sigma = np.clip(self.eta_sigma, 1e-10, self.alpha_sigma_max)
-
-                        self.actor_optimizer.zero_grad()
-                        self.loss_l = -( self.loss_p + self.eta_mu * (self.eps_mu - C_mu) + self.eta_sigma * (self.eps_gamma - C_sigma))
-                        self.mean_loss_l.append(self.loss_l.item())
-                        self.loss_l.backward()
-                        clip_grad_norm_(self.actor.parameters(), 0.1)
-                        self.actor_optimizer.step() 
-                    
-                    t_M_step_end = time.perf_counter()
-                    runtime_M_step += t_M_step_end - t_M_step_start
-
-                    if global_update % self.target_update_period == 0:
-                        self.update_target_actor_critic()
-                    #print("Debug:Update Targets")
-
-                    if r % self.log_inner_interval == 0:
-                        
-                        self.num_steps = it * self.sample_episode_num* self.sample_episode_maxstep
-                        
-                        logs = {
-                            "num_steps": self.num_steps,
-                            "global_update": global_update,
-                            "mean_return_buffer": mean_return_buffer,
-                            "mean_reward_buffer": mean_reward_buffer,
-                            "mean_loss_q": np.mean(self.mean_loss_q),
-                            "mean_loss_p": np.mean(self.mean_loss_p),
-                            "mean_loss_l": np.mean(self.mean_loss_l),
-                            "mean_current_q": np.mean(self.mean_current_q),
-                            "mean_target_q": np.mean(self.mean_target_q),
-                            "runtime_train": train_runtime,
-                            "runtime_env": env_runtime,
-                            "runtime_eval": eval_runtime,
-                            "runtime_policy_eval": runtime_policy_eval,
-                            "runtime_M_step": runtime_M_step,
-                            "runtime_E_step": runtime_E_step,
-                            "eta": self.eta,
-                            "max_kl_mu": np.mean(self.max_kl_mu),
-                            "max_kl_sigma": np.mean(self.max_kl_sigma),
-                            "mean_sigma_det": np.mean(self.mean_sigma_det),
-                            "eta_mu": self.eta_mu,
-                            "eta_sigma": self.eta_sigma,
-                            "var_mean": np.mean(self.var_mean),
-                            "var_min": np.mean(self.var_min),
-                            "var_max": np.mean(self.var_max)
-                        }
-                        
-                        if self.wandb_track is True and log_callback is not None:
-                            log_callback(logs)
-                        self.reset_logs()
-                        
-                    global_update += 1
-
-                t_train_end = time.perf_counter()
-                train_runtime += t_train_end - t_train_start
-                
-                #Evalutation in outer loop
-                if it % self.evaluate_period == 0:
-
-                    t_eval_start = time.perf_counter()
-                    self.actor.eval()
-                    return_eval = self.evaluate()
-                    self.actor.train()
-                    self.num_steps = it * self.sample_episode_num * self.sample_episode_maxstep
-                    logs = {
-                        "num_steps": self.num_steps,
-                        "global_update": global_update,
-                        "iteration": it,
-                        "mean_return_buffer": mean_return_buffer,
-                        "mean_reward_buffer": mean_reward_buffer,
-                        "return_eval": return_eval,
-                        }
-                    if log_callback is not None:
-                        log_callback(logs)
-
-                self.save(it)
-                t_eval_end = time.perf_counter()
-                eval_runtime += t_eval_end -t_eval_start  
-                
-
-"""
