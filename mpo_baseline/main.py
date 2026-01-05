@@ -87,7 +87,7 @@ def train():
     # Create ReplayBuffer
     replaybuffer = ReplayBuffer(args.max_replay_buffer)
 
-    mpo = MPO(args, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device) 
+    mpo = MPO(args,train_env, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device) 
     
     #  compile warmup 
     if getattr(args, "use_compile", True):

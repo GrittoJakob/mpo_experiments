@@ -119,7 +119,8 @@ class Actor(nn.Module):
             mean, std = self.forward(state_batched)
             dist = Independent(Normal(mean,std), 1)
             samples = dist.rsample((sample_num,)).permute(1, 0, 2)
-        return samples
+        return samples, mean, std
+
 
     def ensure_batched(self,tensor):
         return tensor if tensor.ndim == 2 else tensor.unsqueeze(0)

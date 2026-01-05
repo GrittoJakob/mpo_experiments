@@ -91,6 +91,12 @@ class Args:
     """ init value of eta sigma"""
     use_state_dependent_var: bool = True
     """whether std of actor is computed state-dependent oder independent"""
+    use_action_penalty: bool = True
+    """flag for using action penalty"""
+    eps_penalty:float = 1e-3
+    """constrain for action penalty loss term"""
+    init_eta_penalty: float = 0.1
+    """init value of penalty temperature coefficient"""
 
     # ===============================
     # Sampling / Replay Buffer

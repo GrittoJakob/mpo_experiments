@@ -24,6 +24,7 @@ class MPO(object):
     def __init__(
             self, 
             args, 
+            env,
             actor: Actor, 
             target_actor: Actor, 
             critic: Critic, 
@@ -44,6 +45,12 @@ class MPO(object):
         self.target_actor = target_actor
         self.critic = critic
         self.target_critic = target_critic
+        
+        # Environment
+        action_space = env.action_space
+        self.action_space_low  = torch.as_tensor(action_space.low,  dtype=torch.float32, device=device)
+        self.action_space_high = torch.as_tensor(action_space.high, dtype=torch.float32, device=device)
+
 
         # Optimizer
         self.actor_optimizer = actor_optimizer
@@ -79,6 +86,10 @@ class MPO(object):
         # Temperature learning rate (for dual variable eta)
         self.eta_lr = args.eta_lr
 
+        # Dual variables / Lagrange multipliers and counters
+        # Temperature parameter for MPO E-step (initialized randomly)
+        self.eta = np.random.rand()
+
         self.log_dir = args.log_dir
         self.model_dir = os.path.join(self.log_dir, "model")
         os.makedirs(self.model_dir, exist_ok=True)
@@ -86,17 +97,20 @@ class MPO(object):
         # Choose Q-loss type (MSE or Smooth L1)
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
 
+        # Action penalty 
+        self.use_action_penalty = getattr(args, "action_penalization", True)
+        self.eps_penalty = getattr(args, "epsilon_penalty", 1e-3)     # ähnlich Acme default
+        self.eta_penalty_lr = getattr(args, "eta_penalty_lr", self.eta_lr)
+        self.eta_penalty = float(getattr(args, "init_eta_penalty", np.random.rand()))
                           
-        # Dual variables / Lagrange multipliers and counters
-        # Temperature parameter for MPO E-step (initialized randomly)
-        self.eta = np.random.rand()
+        
 
         # Lagrange multipliers for KL constraints in the M-step
         self.eta_mu = torch.full((self.action_dim,), args.init_eta_mu, device=self.device,dtype=torch.float32)
         self.eta_sigma = torch.full((self.action_dim,), args.init_eta_sigma, device=self.device, dtype=torch.float32)
 
     
-    def expectation_step(self, state_batch, sampled_action = None, b_mu = None, b_A= None):
+    def expectation_step(self, state_batch, sampled_actions = None, b_mu = None, b_std= None):
         """
         E-step of MPO:
         - Sample actions from the target policy for each state.
@@ -110,20 +124,11 @@ class MPO(object):
         
         with torch.no_grad():
 
-            if sampled_action is None:
+            if sampled_actions is None:
                 
-                
-                # Get mean and Cholesky factor of the target policy for each state
-                b_mu, b_A = self.target_actor.forward(state_batch)  # (B,)
-
-                # Gaussian policy over actions with batch size K
-                b = Independent(Normal(b_mu, b_A), 1)  # (B,)
-
-                # Sample N actions per state -> shape (sample_num, B, action_dim)
-                sampled_actions = b.sample((sample_num,))  
-                
+                sampled_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch = state_batch, sample_num = sample_num)
+            
             else:
-                sampled_actions = sampled_action
 
                 #Check for correct dimensions
                 self.assert_sampled_actions_shape(sampled_actions, state_batch)
@@ -132,29 +137,41 @@ class MPO(object):
             
             # Evaluate Q-values of the target critic for all (state, action) pairs
             target_q = self.target_critic.forward(
-                expanded_states.reshape(-1, self.state_dim), sampled_actions.reshape(-1, self.action_dim)  # (N * K, action_dim)
+                expanded_states.reshape(-1, self.state_dim), sampled_actions.reshape(-1, self.action_dim)  # (sample_num * B, action_dim)
             ).reshape(sample_num, B)
         
         # Treat target_q as constant w.r.t. eta (no gradients from critic/actor)
         eta_tensor = torch.tensor(self.eta, device=self.device, requires_grad=True)
 
         # Dual function returns a scalar that we differentiate w.r.t. eta
-        dual_val = self.dual_function(eta_tensor, target_q)
-        dual_val.backward()
+        norm_target_q, loss_temperature = self.compute_weights_temperature_loss(eta_tensor, target_q, self.eps_dual)
+        loss_dual = loss_temperature
+
+        if self.use_action_penalty:
+            eta_penalty = torch.tensor(self.eta_penalty, device=self.device, requires_grad=True)
+            # Compute action penalty when out of bound:
+            actions_squashed  = torch.max(torch.min(sampled_actions, self.action_space_high), self.action_space_low)
+            diff_out_of_bound = sampled_actions - actions_squashed
+            cost_out_of_bound = -torch.linalg.norm(diff_out_of_bound, dim=-1)
+
+            penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(eta_penalty, cost_out_of_bound, self.eps_penalty)
+
+            norm_target_q += penalty_normalized_weights
+            norm_target_q = norm_target_q / (norm_target_q.sum(dim=0, keepdim=True) + 1e-8)
+            loss_dual += loss_penalty_temperature
+
+        loss_dual.backward()
+
         with torch.no_grad():
             # Gradient descent update on eta
-            eta_tensor -= self.eta_lr * eta_tensor.grad
-            eta_tensor.clamp_(min=1e-6)
-            self.eta = eta_tensor.item()
+            self.eta = float(torch.clamp(eta_tensor - self.eta_lr * eta_tensor.grad, min=1e-6).item())
+            if self.use_action_penalty:
+                self.eta_penalty = float(torch.clamp(eta_penalty - self.eta_penalty_lr * eta_penalty.grad, min=1e-6).item())
         
-        # Compute normalized weights over actions for each state
-        # Shape stays (sample_num, B), softmax along action-sample dimension sample_num
-        norm_target_q = torch.softmax(target_q / self.eta, dim=0)  # (sample_num, B) or (action_dim, B)
-
-        return sampled_actions, norm_target_q, b_mu, b_A, self.eta
+        return sampled_actions, norm_target_q, b_mu, b_std, self.eta
     
 
-    def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_A): 
+    def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_std): 
         """
         M-step of MPO:
         - Update the policy parameters to maximize the weighted log-likelihood
@@ -165,20 +182,7 @@ class MPO(object):
         self.assert_sampled_actions_shape(sampled_actions, state_batch)
 
         # Current actor parameters for this batch of states
-        mu, A = self.actor.forward(state_batch)
-
-        # paper1 version
-        #policy = MultivariateNormal(loc=mu, scale_tril=A)  # (B,)
-        #loss_p = torch.mean( norm_target_q * policy.expand((N, K)).log_prob(sampled_actions))  # (N, B)
-        #C_mu, C_sigma, sigma_i_det, sigma_det = gaussian_kl( mu_i=b_mu, mu=mu, Ai=b_A, A=A)
-
-        # Two Gaussian policies as in the "paper2" variant:
-        # pi_1 uses new mean and old covariance; pi_2 uses old mean and new covariance.
-
-        # b_std = torch.diagonal(b_A, dim1=-2, dim2=-1)  # (B, da)
-        # std   = torch.diagonal(A,  dim1=-2, dim2=-1)  # (B, da)
-        b_std = b_A
-        std = A
+        mu, std = self.actor.forward(state_batch)      
 
         pi_1 = Independent(Normal(mu, b_std), 1)
         pi_2 = Independent(Normal(b_mu, std), 1)
@@ -189,7 +193,7 @@ class MPO(object):
         self.loss_p = torch.mean(norm_target_q * (logp1 + logp2))
 
         # KL constraints between old and new Gaussian policies
-        C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(b_mu, mu, b_A, A)
+        C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(b_mu, mu, b_std, std)
 
         with torch.no_grad():
 
@@ -249,47 +253,31 @@ class MPO(object):
 
         return stats
 
-    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=32):
+    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=20):
         B = state_batch.size(0)
     
         with torch.no_grad():
-
-            ## get mean, cholesky from target actor --> to sample from Gaussian
             
-            #!concatenation of all steps to perform only one forward pass of action sampling to reduce computional costs!
-            all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
-
-            pi_mean, pi_std = self.target_actor.forward(all_states)  # (2B,)
-            policy = Independent(Normal(pi_mean, pi_std), 1)  # (2B,)
-
-            all_sampled_actions = policy.sample((sample_num,)).permute(1, 0, 2)  # (2B, sample_num, action_dim)
-            sampled_actions      = all_sampled_actions[:B]  # (B, sample_num, action_dim)
-            sampled_next_actions = all_sampled_actions[B:]  # (B, sample_num, action_dim)
-            b_mu = pi_mean[:B]
-            b_A =pi_std[:B]
-
-            # Permute sampled_actions for E-Step:
-            sampled_actions_NBA =  sampled_actions.permute(1, 0,2)    # ( sample_num, B, action_dim)
-
-            expanded_next_states = next_state_batch[:, None, :].expand(-1, sample_num, -1)  # (2B, sample_num, state_dim)
+            sampled_actions, sampled_next_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch, next_state_batch , sample_num = 20)
+            expanded_next_states = next_state_batch[None,:, :].expand(sample_num,-1, -1)  # (sample_num, B, state_dim)
             
             ## get expected Q value from target critic
             expected_next_q = self.target_critic.forward(
-                expanded_next_states.reshape(-1, self.state_dim),  # (B * sample_num, state_dim)
-                sampled_next_actions.reshape(-1, self.action_dim)  # (B * sample_num, action_dim)
-            ).reshape(B, sample_num).mean(dim=1)  # (B,)
+                expanded_next_states.reshape(-1, self.state_dim),  # (sample_num * B, state_dim)
+                sampled_next_actions.reshape(-1, self.action_dim)  # (sample_num * B, action_dim)
+            ).reshape(sample_num, B).mean(dim=0)  # (B,)
             
-            y = reward_batch + self.gamma * expected_next_q
+            q_target = reward_batch + self.gamma * expected_next_q
         self.critic_optimizer.zero_grad()
-        t = self.critic(state_batch, action_batch).squeeze()
-        loss = self.norm_loss_q(y, t)
+        q_current = self.critic(state_batch, action_batch).squeeze()
+        loss = self.norm_loss_q(q_target, q_current)
         loss.backward()
         self.critic_optimizer.step()
 
         # Stats
         critic_loss = loss.detach()
-        q_current = t.mean().detach()
-        q_target = y.mean().detach()
+        q_current = q_current.mean().detach()
+        q_target = q_target.mean().detach()
 
         stats = {
             "critic_loss":  critic_loss,
@@ -297,8 +285,108 @@ class MPO(object):
             "q_target_mean":     q_target
         }
 
-        return stats, sampled_actions_NBA, b_mu, b_A
+        return stats, sampled_actions, b_mu, b_std
 
+    def sample_action_from_target_actor(self, state_batch, next_state_batch = None, sample_num = 20):
+        B = state_batch.size(0)
+        with torch.no_grad():
+
+            if next_state_batch is not None:
+                all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
+
+                # get distribution
+                all_sampled_actions, b_mu, b_std = self.target_actor.sample_action(all_states, sample_num) # (2B,)
+                all_sampled_actions  = all_sampled_actions.permute( 1, 0, 2)    #(sample_num, 2B, action_dim)
+                sampled_actions      = all_sampled_actions[:, :B]  #(sample_num, B, action_dim)
+                sampled_next_actions = all_sampled_actions[:, B:]  #(sample_num, B, action_dim)
+                return sampled_actions, sampled_next_actions, b_mu[:B], b_std[:B]
+            else:
+                sampled_actions, b_mu, b_std = self.target_actor.sample_action(state_batch, sample_num)
+                sampled_actions = sampled_actions.permute(1,0,2)
+                return sampled_actions, b_mu, b_std
+
+
+
+    
+    def assert_sampled_actions_shape(self, sampled_actions, state_batch, name="sampled_actions"):
+        """
+        Ensures sampled_actions has shape (N, B, action_dim)
+        where:
+        sample_num = number of sampled actions per state
+        B = state_batch.size(0)
+        action_dim = self.action_dim
+        """
+
+        assert sampled_actions is not None, f"{name} is None"
+        assert sampled_actions.dim() == 3, \
+            f"{name} must be 3D (sample_num, B, act_dim), got shape {tuple(sampled_actions.shape)}"
+
+        N, B, A = sampled_actions.shape
+        expected_B = state_batch.size(0)
+
+        assert N == self.sample_action_num, \
+            f"{name}: Expected N={self.sample_action_num} actions per state, got N={N}"
+        assert B == expected_B, \
+            f"{name}: Expected B={expected_B} states, got K={B}"
+        assert A == self.action_dim, \
+            f"{name}: Expected action_dim={self.action_dim}, got A={A}"
+
+
+
+    def update_target_actor_critic(self):
+        # param(target_actor) <-- param(actor)
+        for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
+            target_param.data.copy_(param.data)
+
+        # param(target_critic) <-- param(critic)
+        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
+            target_param.data.copy_(param.data)
+    
+
+    
+    def compute_weights_temperature_loss(self, temperature: torch.Tensor, values: torch.Tensor, epsilon: float):
+        """
+        temperature: torch scalar, requires_grad=True
+        values: (N, B)  (keine Gradienten; typischerweise aus target critic, detached)
+        epsilon: float
+        returns:
+        weights: (N, B) detached
+        dual_loss: scalar tensor (hat Grad wrt temperature)
+        """
+        values = values.detach()  # stop grad for 
+
+        # weights (stop grad wrt temperature) 
+        tempered = values / temperature.detach()
+        tempered = tempered - tempered.max(dim=0, keepdim=True).values  # stable
+        weights = torch.softmax(tempered, dim=0).detach()  # detach == stop-gradient
+
+        # dual loss (Grad wrt temperature) 
+        values_T = values.transpose(0, 1)  # (B, N)
+        max_v = values_T.max(dim=1, keepdim=True).values  # (B, 1)
+        exp_term = torch.exp((values_T - max_v) / temperature)  # grad fließt in temperature
+        log_mean_exp = torch.log(exp_term.mean(dim=1) + 1e-8)  # (B,)
+
+        dual_loss = temperature * epsilon + max_v.mean() + temperature * log_mean_exp.mean()
+        return weights, dual_loss
+    
+    # def dual_function(self, eta, target_q):
+    #     """
+    #     eta: scalar Tensor, requires_grad=True
+    #     target_q: Tensor shape (N, K)
+    #     eps_dual: float (epsilon aus Paper)
+    #     """
+    #     tq = target_q.transpose(0, 1)          # (K, N)
+    #     max_q, _ = tq.max(dim=1, keepdim=True)  # (K, 1)
+    #     exp_term = torch.exp((tq - max_q) / eta)       # (K, N)
+    #     inner_mean = exp_term.mean(dim=1)              # (K,)
+    #     log_term = torch.log(inner_mean)               # (K,)
+        
+    #     dual_value = (
+    #         eta * self.eps_dual
+    #         + max_q.squeeze(1).mean()                  # mean der max_q über K
+    #         + eta * log_term.mean()
+    #     )
+    #     return dual_value
 
     # ## Mistake: need to change buffer for storage of old policies!
     # def critic_update_retrace(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):
@@ -337,60 +425,6 @@ class MPO(object):
     #     self.critic_optimizer.step()
 
     #     return critic_loss, current_Q, Q_ret
-
-    
-    def assert_sampled_actions_shape(self, sampled_actions, state_batch, name="sampled_actions"):
-        """
-        Ensures sampled_actions has shape (N, B, action_dim)
-        where:
-        sample_num = number of sampled actions per state
-        B = state_batch.size(0)
-        action_dim = self.action_dim
-        """
-
-        assert sampled_actions is not None, f"{name} is None"
-        assert sampled_actions.dim() == 3, \
-            f"{name} must be 3D (sample_num, B, act_dim), got shape {tuple(sampled_actions.shape)}"
-
-        N, B, A = sampled_actions.shape
-        expected_B = state_batch.size(0)
-
-        assert N == self.sample_action_num, \
-            f"{name}: Expected N={self.sample_action_num} actions per state, got N={N}"
-        assert B == expected_B, \
-            f"{name}: Expected B={expected_B} states, got K={B}"
-        assert A == self.action_dim, \
-            f"{name}: Expected action_dim={self.action_dim}, got A={A}"
-
-
-
-    def update_target_actor_critic(self):
-        # param(target_actor) <-- param(actor)
-        for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
-            target_param.data.copy_(param.data)
-
-        # param(target_critic) <-- param(critic)
-        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
-            target_param.data.copy_(param.data)
-    
-    def dual_function(self, eta, target_q):
-        """
-        eta: scalar Tensor, requires_grad=True
-        target_q: Tensor shape (N, K)
-        eps_dual: float (epsilon aus Paper)
-        """
-        tq = target_q.transpose(0, 1)          # (K, N)
-        max_q, _ = tq.max(dim=1, keepdim=True)  # (K, 1)
-        exp_term = torch.exp((tq - max_q) / eta)       # (K, N)
-        inner_mean = exp_term.mean(dim=1)              # (K,)
-        log_term = torch.log(inner_mean)               # (K,)
-        
-        dual_value = (
-            eta * self.eps_dual
-            + max_q.squeeze(1).mean()                  # mean der max_q über K
-            + eta * log_term.mean()
-        )
-        return dual_value
 
 
     # def load_model(self, path=None):
