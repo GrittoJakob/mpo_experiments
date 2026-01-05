@@ -7,4 +7,6 @@ mpo_baseline/mpo_logs/
 mpo_logs
 videos
 wandb
+mpo_baseline/runs/
+runs/
 

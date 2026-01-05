@@ -17,7 +17,7 @@ class Args:
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
-    track: bool = True
+    wandb_track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "MPO_Ant"
     """the wandb's project name"""
@@ -25,7 +25,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_inner_interval: int = 50
+    log_period: int = 50
     "number of global updates per log to wandb"
     num_threads: int = 16  
     """number of threads to use"""
@@ -33,7 +33,7 @@ class Args:
     """Flag for use of compiled version of actor and critic"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
-    log_videos_period: int = 5
+    log_videos_period: int = 10
     """iterations per logging exactly one episode video"""
 
     # ===============================
@@ -89,6 +89,8 @@ class Args:
     """int value of eta mu"""
     init_eta_sigma: float = 1
     """ init value of eta sigma"""
+    use_state_dependent_var: bool = True
+    """whether std of actor is computed state-dependent oder independent"""
 
     # ===============================
     # Sampling / Replay Buffer

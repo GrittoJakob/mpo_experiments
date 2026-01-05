@@ -12,13 +12,12 @@ import wandb
 from nets.actor import Actor
 from nets.critic import Critic
 from typing import Optional
-from helpers.utils import limit_threads
-from helpers.env_creator import limit_threads, make_train_env, make_env_video, make_eval_env
+from helpers.env_creator import limit_threads, make_train_env, make_eval_env
 from buffer.replaybuffer import ReplayBuffer
 from train_args import Args
-from train_mpo import train_loop
+from train_mpo.train_loop import train_loop
 
-from mpo import MPO
+from mpo.mpo import MPO
 
 def init_runname(args):
      # Run-Name à la CleanRL
@@ -27,7 +26,7 @@ def init_runname(args):
 
 
 def make_envs(args, run_name):
-    train_env = make_train_env(args.env_id,args.seed)
+    train_env = make_train_env(args.env_id, args.seed)
     eval_env = make_eval_env(args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
     args.obs_space = train_env.observation_space.shape[0]
     args.action_dim = train_env.action_space.shape[0]
@@ -64,7 +63,7 @@ def train():
     tb_dir = os.path.join(args.log_dir, "tb", run_name)
 
     # Create train_env and eval_env
-    train_env, eval_env = make_envs(args.env_id, run_name)
+    train_env, eval_env = make_envs(args, args.run_name)
     assert isinstance(train_env.action_space, gym.spaces.Box)
     
     # Seeding 
@@ -78,19 +77,6 @@ def train():
     torch.backends.cudnn.benchmark = False    
     train_env.reset(seed=args.seed)  
 
-    
-    # W&B
-    if args.track:
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=False,   # TensorBoard -> W&B
-            config=vars(args),
-            name=run_name,
-            monitor_gym=False,
-            save_code=True,
-        )
-
     # Create Networks
     actor, critic, target_actor, target_critic = make_networks(args, device)
 
@@ -100,7 +86,7 @@ def train():
     # Create ReplayBuffer
     replaybuffer = ReplayBuffer(args.max_replay_buffer)
 
-    mpo = MPO(args, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer)   
+    mpo = MPO(args, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device)   
 
     train_loop(args, train_env, eval_env, device, replaybuffer, mpo)
 
@@ -112,31 +98,4 @@ if __name__ == "__main__":
 
   
 
-
-  
-
-
-
-    
-
-  
-    # MPO initialisieren
-   
-
-    if args.load is not None:
-        Agent.load_model(args.load)
-
-
-    all_logs = Agent.train(
-        log_callback = log_callback
-    )
-    
-    if args.print_replay_buffer:
-            Agent.replaybuffer.debug_summary()
-            Agent.replaybuffer.print_episode(3,20)
-
-    writer.close()
-    if args.track:
-        wandb.finish()
-    env.close()
 

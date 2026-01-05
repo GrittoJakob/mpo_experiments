@@ -29,7 +29,8 @@ class MPO(object):
             critic: Critic, 
             target_critic: Critic,
             actor_optimizer, 
-            critic_optimizer
+            critic_optimizer,
+            device
             ):
         """
         Main class implementing the MPO agent.
@@ -46,14 +47,17 @@ class MPO(object):
 
         # Optimizer
         self.actor_optimizer = actor_optimizer
-        self.critic_opitimizer =  critic_optimizer
+        self.critic_optimizer =  critic_optimizer
 
         # Environment & basic dimensions
         self.state_dim = args.obs_space
         self.action_dim = args.action_dim
 
         # Device used for tensors / networks (CPU or GPU)
-        self.device = args.device
+        self.device = device
+
+        # Number of action samples
+        self.sample_action_num = args.sample_action_num
 
         # MPO / optimization hyperparameters
         # Dual / KL constraints
@@ -75,19 +79,9 @@ class MPO(object):
         # Temperature learning rate (for dual variable eta)
         self.eta_lr = args.eta_lr
 
-        # Logging behavior (e.g. WandB)
-        self.wandb_track = args.track
-        # Inner-loop logging interval (every N gradient updates)
-        self.log_inner_interval = args.log_inner_interval
-
         self.log_dir = args.log_dir
         self.model_dir = os.path.join(self.log_dir, "model")
         os.makedirs(self.model_dir, exist_ok=True)
-
-        # Policy / value networks and their targets
-        self.std_init = args.std_init             # initial std for Gaussian policy
-        self.use_retrace = args.use_retrace       # whether to use Retrace for critic update
-        self.covariance_type = args.covariance_type
 
         # Choose Q-loss type (MSE or Smooth L1)
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
@@ -111,18 +105,19 @@ class MPO(object):
         - Compute normalized weights over actions (norm_target_q).
         """
 
-        B = self.batch_size  # the sample number of states
+        B = state_batch.shape[0]  # the sample number of states
         sample_num = self.sample_action_num  # the sample number of actions per state
-
+        
         with torch.no_grad():
 
             if sampled_action is None:
+                
                 
                 # Get mean and Cholesky factor of the target policy for each state
                 b_mu, b_A = self.target_actor.forward(state_batch)  # (B,)
 
                 # Gaussian policy over actions with batch size K
-                b = Independent(Normal(b_mu, b_A))  # (B,)
+                b = Independent(Normal(b_mu, b_A), 1)  # (B,)
 
                 # Sample N actions per state -> shape (sample_num, B, action_dim)
                 sampled_actions = b.sample((sample_num,))  
@@ -156,7 +151,7 @@ class MPO(object):
         # Shape stays (sample_num, B), softmax along action-sample dimension sample_num
         norm_target_q = torch.softmax(target_q / self.eta, dim=0)  # (sample_num, B) or (action_dim, B)
 
-        return sampled_actions, norm_target_q, b_mu, b_A, self.eta.detach()
+        return sampled_actions, norm_target_q, b_mu, b_A, self.eta
     
 
     def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_A): 
@@ -264,14 +259,14 @@ class MPO(object):
             #!concatenation of all steps to perform only one forward pass of action sampling to reduce computional costs!
             all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
 
-            pi_mean, pi_A = self.target_actor.forward(all_states)  # (2B,)
-            policy = MultivariateNormal(pi_mean, scale_tril=pi_A)  # (2B,)
+            pi_mean, pi_std = self.target_actor.forward(all_states)  # (2B,)
+            policy = Independent(Normal(pi_mean, pi_std), 1)  # (2B,)
 
             all_sampled_actions = policy.sample((sample_num,)).permute(1, 0, 2)  # (2B, sample_num, action_dim)
             sampled_actions      = all_sampled_actions[:B]  # (B, sample_num, action_dim)
             sampled_next_actions = all_sampled_actions[B:]  # (B, sample_num, action_dim)
             b_mu = pi_mean[:B]
-            b_A =pi_A[:B]
+            b_A =pi_std[:B]
 
             # Permute sampled_actions for E-Step:
             sampled_actions_NBA =  sampled_actions.permute(1, 0,2)    # ( sample_num, B, action_dim)
@@ -305,43 +300,43 @@ class MPO(object):
         return stats, sampled_actions_NBA, b_mu, b_A
 
 
-    ## Mistake: need to change buffer for storage of old policies!
-    def critic_update_retrace(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):
+    # ## Mistake: need to change buffer for storage of old policies!
+    # def critic_update_retrace(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=64):
        
-        with torch.no_grad():
+    #     with torch.no_grad():
 
-            log_prob = self.actor.evaluate_action(state_batch, action_batch)
-            target_log_prob = self.target_actor.evaluate_action(state_batch, action_batch)
+    #         log_prob = self.actor.evaluate_action(state_batch, action_batch)
+    #         target_log_prob = self.target_actor.evaluate_action(state_batch, action_batch)
 
-            c_ret = self.calc_retrace_weights(target_log_prob, log_prob)
+    #         c_ret = self.calc_retrace_weights(target_log_prob, log_prob)
 
-            with torch.no_grad():
-                print("🔍 c_ret stats — min:", c_ret.min().item(), 
-                    "max:", c_ret.max().item(), 
-                    "mean:", c_ret.mean().item())
+    #         with torch.no_grad():
+    #             print("🔍 c_ret stats — min:", c_ret.min().item(), 
+    #                 "max:", c_ret.max().item(), 
+    #                 "mean:", c_ret.mean().item())
 
-            Q_target = self.target_critic(state_batch, action_batch).squeeze(-1)
-              # [B, N, act_dim]
-            sampled_actions = self.target_actor.sample_action(next_state_batch, sample_num=sample_num)  # [B, N, act_dim]
-            s_next_expanded = next_state_batch.unsqueeze(1).expand(-1, sample_num, -1)  # [B, N, obs_dim]
+    #         Q_target = self.target_critic(state_batch, action_batch).squeeze(-1)
+    #           # [B, N, act_dim]
+    #         sampled_actions = self.target_actor.sample_action(next_state_batch, sample_num=sample_num)  # [B, N, act_dim]
+    #         s_next_expanded = next_state_batch.unsqueeze(1).expand(-1, sample_num, -1)  # [B, N, obs_dim]
             
-            flat_s = s_next_expanded.reshape(-1, next_state_batch.shape[-1])
-            flat_a = sampled_actions.reshape(-1, action_batch.shape[-1])
-            flat_q = self.target_critic.forward(flat_s, flat_a).squeeze(-1)  # [B*N]
+    #         flat_s = s_next_expanded.reshape(-1, next_state_batch.shape[-1])
+    #         flat_a = sampled_actions.reshape(-1, action_batch.shape[-1])
+    #         flat_q = self.target_critic.forward(flat_s, flat_a).squeeze(-1)  # [B*N]
 
-            q_values = flat_q.view(state_batch.shape[0], sample_num)  # [B, N]
-            expected_target_Q = q_values.mean(dim=1)  # [B]
+    #         q_values = flat_q.view(state_batch.shape[0], sample_num)  # [B, N]
+    #         expected_target_Q = q_values.mean(dim=1)  # [B]
             
-            Q_ret = reward_batch + self.gamma * (expected_target_Q + c_ret * (expected_target_Q - Q_target))
+    #         Q_ret = reward_batch + self.gamma * (expected_target_Q + c_ret * (expected_target_Q - Q_target))
 
-        current_Q = self.critic(state_batch, action_batch).squeeze(-1)  # [B]
+    #     current_Q = self.critic(state_batch, action_batch).squeeze(-1)  # [B]
         
-        critic_loss = self.norm_loss_q(current_Q, Q_ret)
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
+    #     critic_loss = self.norm_loss_q(current_Q, Q_ret)
+    #     self.critic_optimizer.zero_grad()
+    #     critic_loss.backward()
+    #     self.critic_optimizer.step()
 
-        return critic_loss, current_Q, Q_ret
+    #     return critic_loss, current_Q, Q_ret
 
     
     def assert_sampled_actions_shape(self, sampled_actions, state_batch, name="sampled_actions"):
@@ -398,90 +393,90 @@ class MPO(object):
         return dual_value
 
 
-    def load_model(self, path=None):
-        load_path = path if path is not None else self.save_path
-        with torch.serialization.safe_globals([np.core.multiarray.scalar]):
-            checkpoint = torch.load(load_path, weights_only=False)
+    # def load_model(self, path=None):
+    #     load_path = path if path is not None else self.save_path
+    #     with torch.serialization.safe_globals([np.core.multiarray.scalar]):
+    #         checkpoint = torch.load(load_path, weights_only=False)
   
        
-        self.critic.load_state_dict(checkpoint['critic'])
-        self.target_critic.load_state_dict(checkpoint['target_critic'])
-        self.actor.load_state_dict(checkpoint['actor'])
-        self.target_actor.load_state_dict(checkpoint['target_actor'])
-        self.critic_optimizer.load_state_dict(checkpoint['critic_optim'])
-        self.actor_optimizer.load_state_dict(checkpoint['actor_optim'])
+    #     self.critic.load_state_dict(checkpoint['critic'])
+    #     self.target_critic.load_state_dict(checkpoint['target_critic'])
+    #     self.actor.load_state_dict(checkpoint['actor'])
+    #     self.target_actor.load_state_dict(checkpoint['target_actor'])
+    #     self.critic_optimizer.load_state_dict(checkpoint['critic_optim'])
+    #     self.actor_optimizer.load_state_dict(checkpoint['actor_optim'])
 
-        # load Lagrange multipliers
-        self.eta = checkpoint["eta"]
-        self.eta_mu = checkpoint["eta_mu"]
-        self.eta_sigma = checkpoint["eta_sigma"]
+    #     # load Lagrange multipliers
+    #     self.eta = checkpoint["eta"]
+    #     self.eta_mu = checkpoint["eta_mu"]
+    #     self.eta_sigma = checkpoint["eta_sigma"]
                 
-        # replay buffer
-        if "replay_buffer" in checkpoint:
-            self.replaybuffer.load_state_dict(checkpoint["replay_buffer"])
+    #     # replay buffer
+    #     if "replay_buffer" in checkpoint:
+    #         self.replaybuffer.load_state_dict(checkpoint["replay_buffer"])
 
-        self.critic.train()
-        self.target_critic.eval()
-        self.actor.train()
-        self.target_actor.eval()
+    #     self.critic.train()
+    #     self.target_critic.eval()
+    #     self.actor.train()
+    #     self.target_actor.eval()
 
-    def save_lightweight(self, path, iteration):
-        """Fast checkpoint: networks + optimizers only."""
-        data = {
-            "iteration": iteration,
-            "actor": self.actor.state_dict(),
-            "critic": self.critic.state_dict(),
-            "target_actor": self.target_actor.state_dict(),
-            "target_critic": self.target_critic.state_dict(),
-            "actor_optim": self.actor_optimizer.state_dict(),
-            "critic_optim": self.critic_optimizer.state_dict(),
+    # def save_lightweight(self, path, iteration):
+    #     """Fast checkpoint: networks + optimizers only."""
+    #     data = {
+    #         "iteration": iteration,
+    #         "actor": self.actor.state_dict(),
+    #         "critic": self.critic.state_dict(),
+    #         "target_actor": self.target_actor.state_dict(),
+    #         "target_critic": self.target_critic.state_dict(),
+    #         "actor_optim": self.actor_optimizer.state_dict(),
+    #         "critic_optim": self.critic_optimizer.state_dict(),
 
-            # Lagrange multipliers
-            "eta": self.eta,
-            "eta_mu": self.eta_mu,
-            "eta_sigma": self.eta_sigma
-        }
-        torch.save(data, path)
+    #         # Lagrange multipliers
+    #         "eta": self.eta,
+    #         "eta_mu": self.eta_mu,
+    #         "eta_sigma": self.eta_sigma
+    #     }
+    #     torch.save(data, path)
 
-    def save_full(self, path,iteration):
-        """Full checkpoint including replay buffer."""
-        data = {
-            "iteration": iteration,
-            "actor": self.actor.state_dict(),
-            "critic": self.critic.state_dict(),
-            "target_actor": self.target_actor.state_dict(),
-            "target_critic": self.target_critic.state_dict(),
-            "actor_optim": self.actor_optimizer.state_dict(),
-            "critic_optim": self.critic_optimizer.state_dict(),
+    # def save_full(self, path,iteration):
+    #     """Full checkpoint including replay buffer."""
+    #     data = {
+    #         "iteration": iteration,
+    #         "actor": self.actor.state_dict(),
+    #         "critic": self.critic.state_dict(),
+    #         "target_actor": self.target_actor.state_dict(),
+    #         "target_critic": self.target_critic.state_dict(),
+    #         "actor_optim": self.actor_optimizer.state_dict(),
+    #         "critic_optim": self.critic_optimizer.state_dict(),
 
-            # Lagrange multipliers
-            "eta": self.eta,
-            "eta_mu": self.eta_mu,
-            "eta_sigma": self.eta_sigma,
+    #         # Lagrange multipliers
+    #         "eta": self.eta,
+    #         "eta_mu": self.eta_mu,
+    #         "eta_sigma": self.eta_sigma,
 
-            # Replay buffer
-            "replay_buffer": self.replaybuffer.state_dict()
-        }
-        tmp = path + ".tmp"
-        torch.save(data, tmp)
-        os.replace(tmp, path)
+    #         # Replay buffer
+    #         "replay_buffer": self.replaybuffer.state_dict()
+    #     }
+    #     tmp = path + ".tmp"
+    #     torch.save(data, tmp)
+    #     os.replace(tmp, path)
 
-    def save(self, iteration):
-        """Main save function controlled by configuration."""
-        # 1) ALWAYS save a lightweight latest model
-        if self.save_latest:
-            self.save_lightweight(
-                os.path.join(self.model_dir, "latest_model_without_rb.pt"),
-                iteration
-            )
+    # def save(self, iteration):
+    #     """Main save function controlled by configuration."""
+    #     # 1) ALWAYS save a lightweight latest model
+    #     if self.save_latest:
+    #         self.save_lightweight(
+    #             os.path.join(self.model_dir, "latest_model_without_rb.pt"),
+    #             iteration
+    #         )
 
-        # 2) EVERY N iterations save a full snapshot
-        if iteration % self.save_every == 0:
+    #     # 2) EVERY N iterations save a full snapshot
+    #     if iteration % self.save_every == 0:
             
-            if self.save_replay_buffer:
-                path = os.path.join(self.model_dir, "full_backup.pt")
-                if os.path.exists(path):
-                    os.remove(path)
-                self.save_full(path,iteration)
-            else:
-                self.save_lightweight(os.path.join(self.model_dir, "latest_model_without_rb.pt"))
+    #         if self.save_replay_buffer:
+    #             path = os.path.join(self.model_dir, "full_backup.pt")
+    #             if os.path.exists(path):
+    #                 os.remove(path)
+    #             self.save_full(path,iteration)
+    #         else:
+    #             self.save_lightweight(os.path.join(self.model_dir, "latest_model_without_rb.pt"))

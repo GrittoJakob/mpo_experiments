@@ -4,9 +4,9 @@ import os
 import glob
 import wandb
 
-def log_one_episode_video(args, actor, device, run_name, name_prefix: str, global_update):
+def log_one_episode_video(args, actor, device, name_prefix, global_steps):
 
-    venv = make_video_env(args, run_name, name_prefix=name_prefix)
+    venv = make_video_env(args, args.run_name, name_prefix)
     try:
         # eine Episode deterministic laufen lassen
         actor.eval()
@@ -41,7 +41,7 @@ def log_one_episode_video(args, actor, device, run_name, name_prefix: str, globa
             "rollout/video_return": total_reward,
             "rollout/video_len": steps,
         },
-        step=global_update,
+        step=global_steps,
     )
 
     # optional: clean up

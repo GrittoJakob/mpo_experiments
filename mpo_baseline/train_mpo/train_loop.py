@@ -2,7 +2,7 @@ import random
 import time
 import os
 import math
-import tqdm
+from tqdm import tqdm
 import numpy as np
 import gymnasium as gym
 import torch
@@ -16,8 +16,8 @@ from mpo.mpo import MPO
 from buffer.replaybuffer import ReplayBuffer
 from rollout.rollout import collect_rollout
 from rollout.video_rollout import log_one_episode_video
-from evaluation import evaluate
-from helpers.logging import log_callback
+from train_mpo.evaluation import evaluate
+
 
 
 def train_loop(
@@ -36,7 +36,7 @@ def train_loop(
     - Periodically evaluates and logs statistics.
     """
 
-    if args.track:
+    if args.wandb_track:
         import wandb
         wandb.init(
             project=args.wandb_project_name,
@@ -93,9 +93,9 @@ def train_loop(
         #Update current steps for while loop
         num_steps += new_steps
         
-        if args.wandb_track and it % args.log_videos_period == 0:
+        if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
-            log_one_episode_video(name_prefix=prefix)
+            log_one_episode_video(args, mpo.actor, device, prefix, num_steps)
 
         # For terminal logging
         pbar.update(new_steps)
@@ -140,7 +140,7 @@ def train_loop(
                 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()
-                sampled_actions, norm_target_q, b_mu, b_A, eta_dual = args.expectation_step(state_batch, sampled_actions, b_mu, b_A)
+                sampled_actions, norm_target_q, b_mu, b_A, eta_dual = mpo.expectation_step(state_batch,sampled_action=sampled_actions, b_mu = b_mu, b_A = b_A)
                 t_E_step_end = time.perf_counter()         
                 runtime_E_step += t_E_step_end - t_E_step_start
 
@@ -152,11 +152,12 @@ def train_loop(
 
 
         # logging 
-        if i_update % args.log_inner_interval == 0:
+        if args.wandb_track and i_update % args.log_period== 0:
             
             # Compute mean reward/return in replay buffer
             mean_reward_buffer = replaybuffer.mean_reward()
-            mean_return_buffer = replaybuffer.mean_return()                 
+            mean_return_buffer = replaybuffer.mean_return() 
+            mean_episode_len = mean_return_buffer/(mean_reward_buffer+ 1e-8)                
             
              # Timing
             writer.add_scalar("time/rollout_time_sec", runtime_rollout, grad_updates)
@@ -172,6 +173,7 @@ def train_loop(
             writer.add_scalar("buffer/num_steps", replaybuffer.num_steps() ,grad_updates)
             writer.add_scalar("buffer/mean_return", mean_return_buffer , grad_updates)
             writer.add_scalar("buffer/mean_reward_per_step", mean_reward_buffer ,grad_updates)
+            writer.add_scalar("buffer/mean_episode_len", mean_episode_len, grad_updates)
             writer.add_scalar("buffer/num_steps",num_steps, grad_updates)
             
             # M-Step Logging
@@ -202,8 +204,7 @@ def train_loop(
 
 
 
-            # Increase global update counter after each gradient update    
-            grad_updates += 1
+        
 
         # Evaluation in the outer loop
         if it % args.evaluate_period == 0:
@@ -212,7 +213,7 @@ def train_loop(
 
             # Evaluate current policy without gradient tracking
             mpo.actor.eval()
-            evaluate(args, mpo.actor, eval_env, writer, device)
+            evaluate(args, mpo.actor, eval_env, writer, device, num_steps)
             mpo.actor.train()
             t_eval_end = time.perf_counter()
             runtime_eval += t_eval_end -t_eval_start 
@@ -222,8 +223,11 @@ def train_loop(
         if grad_updates % args.target_update_period == 0:
             mpo.update_target_actor_critic()
 
-        if it % args.save_every == 0:
-            mpo.save(it)
+        # if it % args.save_every == 0:
+        #     mpo.save(it)
 
         it += 1  
+        # Increase global update counter after each gradient update    
+        grad_updates += 1
+
     pbar.close()

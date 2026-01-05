@@ -9,11 +9,11 @@ class Actor(nn.Module):
     
     def __init__(self, args):
         super(Actor, self).__init__()
-        self.ds = args.obs_spce
+        self.ds = args.obs_space
         self.da = args.action_dim
         self.hs= args.hidden_size_actor
         self._printed_init_cov = False
-        self.use_state_dependant_var = args.use_state_dependant_var
+        self.use_state_dependent_var = args.use_state_dependent_var
         std_init = args.std_init
         
 
@@ -31,14 +31,14 @@ class Actor(nn.Module):
         def softplus_inv(y):
             return torch.log(torch.exp(torch.tensor(y)) - 1.0)
 
-        if self.use_state_dependant_var:
+        if self.use_state_dependent_var:
 
             self.std_layer = nn.Linear(self.hs, self.da)
             with torch.no_grad():
                 self.std_layer.weight.zero_()
                 self.std_layer.bias.fill_(softplus_inv(std_init))
         else:
-            self.log_layer = nn.Parameter(torch.ones(self.da) * -0.5) # -1 scaling to make initialization calmer
+            self.log_std = nn.Parameter(torch.ones(self.da) * -0.5) # -1 scaling to make initialization calmer
 
     def forward(self, state):
         """
@@ -56,7 +56,7 @@ class Actor(nn.Module):
         #Mean Kopf
         mean = self.mean_layer(x)   # (B, da)
         
-        if self.use_state_dependant_var:
+        if self.use_state_dependent_var:
             std = F.softplus(self.std_layer(x))    # (B, da)
         
         else:
@@ -71,7 +71,7 @@ class Actor(nn.Module):
         return mean, std
    
      
-    def action(self, state, clip_to_env: bool = True, deterministic: bool = False):
+    def action(self, state, clip_to_env: bool = False, deterministic: bool = False):
         """
         :param state: (ds,)
         :return: an action
@@ -79,7 +79,7 @@ class Actor(nn.Module):
         with torch.no_grad():
             state_batched = self.ensure_batched(state)
             mean, std = self.forward(state_batched)
-            action_distribution = Independent(Normal(mean, std))
+            action_distribution = Independent(Normal(mean, std), 1)
 
             if deterministic:
                 action = mean[0]
@@ -103,7 +103,7 @@ class Actor(nn.Module):
         state_batched = self.ensure_batched(state)
         action_batched = self.ensure_batched(action)
         mean, std= self.forward(state_batched)
-        action_distribution = Independent(Normal(mean, std))
+        action_distribution = Independent(Normal(mean, std), 1)
         log_prob = action_distribution.log_prob(action_batched)
         return log_prob
 
@@ -117,7 +117,7 @@ class Actor(nn.Module):
         with torch.no_grad():
             state_batched = self.ensure_batched(state)
             mean, std = self.forward(state_batched)
-            dist = Independent(Normal(mean,std))
+            dist = Independent(Normal(mean,std), 1)
             samples = dist.rsample((sample_num,)).permute(1, 0, 2)
         return samples
 

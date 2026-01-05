@@ -46,4 +46,4 @@ def make_eval_env(env_id, seed, capture_video, run_name, name_prefix="rollout"):
     return env
 
 def make_video_env(args, run_name, name_prefix: str):
-        return make_eval_env(args.env_id, True, run_name, name_prefix=name_prefix)
+        return make_eval_env(args.env_id,args.seed, True, run_name, name_prefix)

@@ -28,7 +28,7 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                 
                 # Get action from actor
                 action = actor.action(state_tensor, deterministic = True)
-                action_list.append(action.detach().cpu().numpy())
+                action_list.append(action)
 
                 # Step environment
                 next_state, reward, terminated, truncated, info = eval_env.step(action)
