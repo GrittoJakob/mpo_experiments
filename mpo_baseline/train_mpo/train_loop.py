@@ -132,7 +132,7 @@ def train_loop(
             t_policy_eval_start = time.perf_counter()
 
            
-            critic_update_stats, sampled_actions, b_mu, b_std = mpo.critic_update_td( 
+            critic_update_stats, sampled_actions, b_mu, b_std= mpo.critic_update_td( 
                 state_batch =state_batch, 
                 action_batch =action_batch, 
                 next_state_batch =next_state_batch, 
@@ -147,7 +147,7 @@ def train_loop(
                 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()
-                sampled_actions, norm_target_q, b_mu, b_A, eta_dual = mpo.expectation_step(
+                sampled_actions, norm_target_q, b_mu, b_A, stats_e_step = mpo.expectation_step(
                     state_batch =state_batch, 
                     sampled_actions=sampled_actions, 
                     b_mu = b_mu, 
@@ -213,7 +213,11 @@ def train_loop(
                 writer.add_scalar("m-step/mu_max", stats_m["mu_max"], grad_updates)
                 
                 # E-Step Logging
-                writer.add_scalar("e-step/eta_dual", eta_dual, grad_updates)
+                writer.add_scalar("e-step/eta_dual", stats_e_step["eta_dual"], grad_updates)
+                writer.add_scalar("e-step/eta_penalty", stats_e_step["eta_penalty"], grad_updates)
+                writer.add_scalar("e-step/penalty_mean", stats_e_step["penalty_mean"], grad_updates)
+                writer.add_scalar("e-step/penalty_min", stats_e_step["penalty_min"], grad_updates)
+                writer.add_scalar("e-step/penalty_max", stats_e_step["penalty_max"], grad_updates)
 
                 # Retrace Logging
                 writer.add_scalar("critic_update/q_loss", critic_update_stats["critic_loss"], grad_updates)

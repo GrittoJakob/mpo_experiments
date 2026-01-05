@@ -168,7 +168,19 @@ class MPO(object):
             if self.use_action_penalty:
                 self.eta_penalty = float(torch.clamp(eta_penalty - self.eta_penalty_lr * eta_penalty.grad, min=1e-6).item())
         
-        return sampled_actions, norm_target_q, b_mu, b_std, self.eta
+        
+
+        stats = {"eta_dual": float(self.eta)}
+
+        if self.use_action_penalty:
+            stats.update({
+                "eta_penalty": float(self.eta_penalty),
+                "penalty_mean": float(cost_out_of_bound.mean().item()),
+                "penalty_min": float(cost_out_of_bound.min().item()),
+                "penalty_max": float(cost_out_of_bound.max().item()),
+            })
+
+        return sampled_actions, norm_target_q, b_mu, b_std, stats
     
 
     def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_std): 

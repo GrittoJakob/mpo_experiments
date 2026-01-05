@@ -118,6 +118,10 @@ def warmup_mpo_compile(args, device, env, mpo, *, compile_mode: str = "reduce-ov
     # Build (sampled_actions, weights) similarly to E-step, then do weighted log-prob loss.
     with torch.no_grad():
         mu_b, std_b = mpo.target_actor.forward(state)
+        
+        if device.type == "cuda":
+            mu_b = mu_b.clone()
+            std_b = std_b.clone()
         pi_b = Independent(Normal(mu_b, std_b), 1)
         sampled_actions = pi_b.sample((S,))  # (S,B,act)
 
@@ -133,6 +137,9 @@ def warmup_mpo_compile(args, device, env, mpo, *, compile_mode: str = "reduce-ov
 
     # current policy params
     mu, std = mpo.actor.forward(state)
+    if device.type == "cuda":
+        mu = mu.clone()
+        std = std.clone()
 
     # "paper2 style" split objective like in your mpo.maximization_step :contentReference[oaicite:3]{index=3}
     pi1 = Independent(Normal(mu, std_b), 1)   # new mean, old std

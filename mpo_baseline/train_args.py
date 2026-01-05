@@ -9,17 +9,17 @@ class Args:
     # ===============================
     # General System & Environment
     # ===============================
-    exp_name: str = "mpo_ant"
+    exp_name: str = "mpo_pendulum"
     """the name of this experiment"""
     device: str = "cuda"
     """device used for training ('cpu' or 'cuda')"""
-    env_id: str = "Ant-v5"
+    env_id: str = "Pendulum-v1"
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
     wandb_track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "MPO_Ant"
+    wandb_project_name: str = "MPO_Pendulum"
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
@@ -29,8 +29,6 @@ class Args:
     "number of global updates per log to wandb"
     num_threads: int = 16  
     """number of threads to use"""
-    use_compile: bool = False
-    """Flag for use of compiled version of actor and critic"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
     log_videos_period: int = 10
@@ -101,26 +99,26 @@ class Args:
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
-    sample_steps_per_iter: int = 1000
+    sample_steps_per_iter: int = 400
     """number of env steps to sample per iteration"""
-    sample_episode_maxstep: int = 1000
+    sample_episode_maxstep: int = 200
     """maximum number of steps per sampled episode"""
     batch_size: int = 512
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 2000000
+    max_training_steps: int = 1000000
     """Maximal number of env steps for training"""
 
     # ===============================
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 1
+    evaluate_period: int = 5
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 10
+    evaluate_episode_num: int = 5
     """how many evaluation episodes to run"""
-    evaluate_episode_maxstep: int = 1000
+    evaluate_episode_maxstep: int = 200
     """max steps per evaluation episode"""
 
     # ===============================
@@ -142,4 +140,4 @@ class Args:
     # warm up compilation
     # ===============================
     use_compile: bool = True
-    compile_mode: str=  "reduce-overhead"
+    compile_mode: str=  "reduce-overh"
