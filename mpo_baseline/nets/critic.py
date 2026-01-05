@@ -9,7 +9,7 @@ class Critic(nn.Module):
     This critic takes as input a state and an action, concatenates them,
     and outputs a single scalar Q-value per batch element.
     """
-    def __init__(self, env, hidden_size_critic):
+    def __init__(self, args):
 
         """
         :param env: Gym/Gymnasium-like environment (used to infer state/action dims)
@@ -18,10 +18,9 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         # Dimensions
-        self.env = env
-        self.ds = env.observation_space.shape[0]
-        self.da = env.action_space.shape[0]
-        self.hs = hidden_size_critic
+        self.ds = args.obs_spce
+        self.da = args.action_dim
+        self.hs = args.hidden_size_critic
 
         # Simple MLP over concatenated [state, action]
         self.net = nn.Sequential(

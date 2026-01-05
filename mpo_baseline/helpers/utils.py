@@ -1,12 +1,14 @@
 import torch
 import os
 import gymnasium as gym
+import wandb
 
 def btr(m):
     return m.diagonal(dim1=-2, dim2=-1).sum(-1)
 
 def bt(m):
     return m.transpose(dim0=-2, dim1=-1)
+
 
 def gaussian_kl(mu_i, mu, Ai, A):
     """
@@ -84,32 +86,3 @@ def gaussian_kl_diag(mu_i, mu, Ai, A, eps=1e-8):
 
     return C_mu_dim_mean, C_sigma_dim_mean, C_mu_scalar, C_sigma_scalar
 
-def limit_threads(n: int):
-    # PyTorch threads
-    torch.set_num_threads(n)
-    torch.set_num_interop_threads(1)
-
-    # NumPy / BLAS threads (muss vor Imports passieren, aber auch so meist ok)
-    os.environ["OMP_NUM_THREADS"] = str(n)
-    os.environ["OPENBLAS_NUM_THREADS"] = str(n)
-    os.environ["MKL_NUM_THREADS"] = str(n)
-    os.environ["NUMEXPR_NUM_THREADS"] = str(n)
-
-
-def make_env(env_id, capture_video, run_name, name_prefix="rollout"):
-    if capture_video:
-        env = gym.make(env_id, render_mode="rgb_array")
-
-        # in dieser (frisch erzeugten) video-env: genau Episode 0 aufnehmen
-        env = gym.wrappers.RecordVideo(
-            env,
-            f"videos/{run_name}",
-            name_prefix=name_prefix,
-            episode_trigger=lambda ep: ep == 0,
-        )
-    else:
-        env = gym.make(env_id)
-
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = gym.wrappers.ClipAction(env)
-    return env
