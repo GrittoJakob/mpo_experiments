@@ -152,7 +152,7 @@ def train_loop(
 
 
         # logging 
-        if args.wandb_track and i_update % args.log_period== 0:
+        if args.wandb_track and i_update % args.log_period == 0:
             
             # Compute mean reward/return in replay buffer
             mean_reward_buffer = replaybuffer.mean_reward()

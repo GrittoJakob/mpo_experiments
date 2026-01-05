@@ -16,6 +16,7 @@ from helpers.env_creator import limit_threads, make_train_env, make_eval_env
 from buffer.replaybuffer import ReplayBuffer
 from train_args import Args
 from train_mpo.train_loop import train_loop
+from helpers.warm_up_compilation import warmup_mpo_compile
 
 from mpo.mpo import MPO
 
@@ -86,11 +87,19 @@ def train():
     # Create ReplayBuffer
     replaybuffer = ReplayBuffer(args.max_replay_buffer)
 
-    mpo = MPO(args, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device)   
+    mpo = MPO(args, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device) 
+    
+    #  compile warmup 
+    if getattr(args, "use_compile", True):
+        mpo = warmup_mpo_compile(
+            args=args,
+            device=device,
+            env=train_env,          # wichtig: ein env reicht für shapes
+            mpo=mpo,
+            compile_mode=getattr(args, "compile_mode", "reduce-overhead"),
+        )  
 
     train_loop(args, train_env, eval_env, device, replaybuffer, mpo)
-
-
 
 
 if __name__ == "__main__":

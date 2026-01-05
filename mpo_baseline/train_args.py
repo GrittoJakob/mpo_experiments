@@ -131,3 +131,9 @@ class Args:
     """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
     save_replay_buffer: bool = True
     """whether to include replay buffer in checkpoints (large files!)"""
+
+    # ===============================
+    # warm up compilation
+    # ===============================
+    use_compile: bool = True
+    compile_mode: str=  "reduce-overhead"
