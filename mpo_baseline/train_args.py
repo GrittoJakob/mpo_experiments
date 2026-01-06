@@ -9,17 +9,17 @@ class Args:
     # ===============================
     # General System & Environment
     # ===============================
-    exp_name: str = "mpo_pendulum"
+    exp_name: str = "mpo"
     """the name of this experiment"""
     device: str = "cuda"
     """device used for training ('cpu' or 'cuda')"""
-    env_id: str = "Pendulum-v1"
+    env_id: str = "Ant-v5"
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
     wandb_track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "MPO_Pendulum"
+    wandb_project_name: str = "MPO_Ant"
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
@@ -31,7 +31,7 @@ class Args:
     """number of threads to use"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
-    log_videos_period: int = 10
+    log_videos_period: int = 20
     """iterations per logging exactly one episode video"""
 
     # ===============================
@@ -49,19 +49,17 @@ class Args:
     """hidden size of actor network"""
     hidden_size_critic: int = 512
     """hidden size of critc network"""
-    use_retrace: bool = False
-    """True for use of retrace, false for TD approach"""
-    actor_lr: float = 1e-4
+    actor_lr: float = 2e-4
     """Learning rate for actor Adam optimizer"""
-    critic_lr: float = 1e-4
+    critic_lr: float = 3e-4
     """Learning rate for critic adam optimizer"""
-    eta_lr : float = 1e-2
+    eta_lr : float = 1e-3
     "Learning rate for dual function"
     dual_constraint: float = 0.1
     """hard constraint of the dual formulation in the E-step"""
-    kl_mean_constraint: float = 0.001   
+    kl_mean_constraint: float = 5e-4   
     """hard constraint of the mean in the M-step"""
-    kl_var_constraint: float = 0.00001        
+    kl_var_constraint: float = 1.25e-6        
     """hard constraint of the covariance in the M-step"""
     alpha_mean_scale: float = 1.0
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
@@ -73,9 +71,9 @@ class Args:
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
     q_loss_type: str = 'mse'
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
-    UTD_ratio: float = 1.0
+    UTD_ratio: float = 0.75
     """ Ratio: num_updates per env step"""
-    max_replay_buffer: int = 2000000
+    max_replay_buffer: int = 1000000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
@@ -85,23 +83,25 @@ class Args:
     """number of critic updates per policy update"""
     init_eta_mu: float = 0.05
     """int value of eta mu"""
-    init_eta_sigma: float = 1
+    init_eta_sigma: float = 1.0
     """ init value of eta sigma"""
+    init_eta_dual: float = 1.5
+    """ init value of temperature variable"""
     use_state_dependent_var: bool = True
     """whether std of actor is computed state-dependent oder independent"""
     use_action_penalty: bool = True
     """flag for using action penalty"""
     eps_penalty:float = 1e-3
     """constrain for action penalty loss term"""
-    init_eta_penalty: float = 0.1
-    """init value of penalty temperature coefficient"""
+    penalty_mix: float = 0.1
+    """parameter for mixing dual_losses in E-Step (action penalty and normal dual loss)"""
 
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
-    sample_steps_per_iter: int = 400
+    sample_steps_per_iter: int = 1000
     """number of env steps to sample per iteration"""
-    sample_episode_maxstep: int = 200
+    sample_episode_maxstep: int = 1000
     """maximum number of steps per sampled episode"""
     batch_size: int = 512
     """batch size used when sampling from replay buffer"""
@@ -116,9 +116,9 @@ class Args:
 
     evaluate_period: int = 5
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 5
+    evaluate_episode_num: int = 3
     """how many evaluation episodes to run"""
-    evaluate_episode_maxstep: int = 200
+    evaluate_episode_maxstep: int = 1000
     """max steps per evaluation episode"""
 
     # ===============================
@@ -140,4 +140,4 @@ class Args:
     # warm up compilation
     # ===============================
     use_compile: bool = True
-    compile_mode: str=  "reduce-overh"
+    compile_mode: str=  "default"

@@ -53,6 +53,7 @@ def train():
     
     # Device
     device = torch.device("cuda" if (args.device == "cuda" and torch.cuda.is_available()) else "cpu")
+    print("Device: ", device)
 
 
     # Run-Name 

@@ -9,6 +9,13 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     Run evaluation episodes using the current policy (self.actor)
     and return the average total reward per episode.
     """
+    # print("eval_env.action_space.low/high:",
+    #   eval_env.action_space.low.min(), eval_env.action_space.high.max())
+
+    # if hasattr(eval_env, "unwrapped"):
+    #     print("eval_env.unwrapped.action_space.low/high:",
+    #     eval_env.unwrapped.action_space.low.min(), eval_env.unwrapped.action_space.high.max())
+
     # No gradients needed during evaluation
     with torch.no_grad():
         total_rewards = []
@@ -28,6 +35,7 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                 
                 # Get action from actor
                 action = actor.action(state_tensor, deterministic = True)
+                
                 action_list.append(action)
 
                 # Step environment
@@ -53,10 +61,10 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     writer.add_scalar("eval/episodic_length", mean_episode_len, global_step)
     
     # Log Action Magnitude
-    actions = np.concatenate(action_list, axis=0)   # shape [T, act_dim]
-    mean_abs = np.mean(np.abs(actions))
-    max_abs  = np.max(np.abs(actions))
-    mean_raw = np.mean(actions)
+    actions = np.stack(action_list, axis=0)  # [T, act_dim]
+    mean_abs = np.mean(np.abs(action_list))
+    max_abs  = np.max(np.abs(action_list))
+    mean_raw = np.mean(action_list)
     writer.add_scalar("eval/action_mean_abs", mean_abs, global_step)
     writer.add_scalar("eval/action_max_abs", max_abs, global_step)
     writer.add_scalar("eval/action_mean", mean_raw, global_step)

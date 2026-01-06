@@ -47,10 +47,12 @@ class MPO(object):
         self.target_critic = target_critic
         
         # Environment
-        action_space = env.action_space
-        self.action_space_low  = torch.as_tensor(action_space.low,  dtype=torch.float32, device=device)
-        self.action_space_high = torch.as_tensor(action_space.high, dtype=torch.float32, device=device)
+        true_action_space = env.unwrapped.action_space
+        self.action_space_low  = torch.as_tensor(true_action_space.low,  dtype=torch.float32, device=device)
+        self.action_space_high = torch.as_tensor(true_action_space.high, dtype=torch.float32, device=device)
 
+        print("Action Space: Low: ", self.action_space_low)
+        print("Action Space: High: ", self.action_space_high)
 
         # Optimizer
         self.actor_optimizer = actor_optimizer
@@ -88,7 +90,7 @@ class MPO(object):
 
         # Dual variables / Lagrange multipliers and counters
         # Temperature parameter for MPO E-step (initialized randomly)
-        self.eta = np.random.rand()
+        self.eta = args.init_eta_dual
 
         self.log_dir = args.log_dir
         self.model_dir = os.path.join(self.log_dir, "model")
@@ -98,10 +100,11 @@ class MPO(object):
         self.norm_loss_q = nn.MSELoss() if args.q_loss_type == 'mse' else nn.SmoothL1Loss()
 
         # Action penalty 
-        self.use_action_penalty = getattr(args, "action_penalization", True)
-        self.eps_penalty = getattr(args, "epsilon_penalty", 1e-3)     # ähnlich Acme default
+        self.use_action_penalty = args.use_action_penalty
+        self.eps_penalty = getattr(args, "eps_penalty", 1e-3)     # ähnlich Acme default
         self.eta_penalty_lr = getattr(args, "eta_penalty_lr", self.eta_lr)
-        self.eta_penalty = float(getattr(args, "init_eta_penalty", np.random.rand()))
+        self.eta_penalty = self.eta
+        self.lam = args.penalty_mix
                           
         
 
@@ -118,7 +121,7 @@ class MPO(object):
         - Update the temperature parameter eta via the dual function.
         - Compute normalized weights over actions (norm_target_q).
         """
-
+        diff_out_of_bound = None
         B = state_batch.shape[0]  # the sample number of states
         sample_num = self.sample_action_num  # the sample number of actions per state
         
@@ -127,7 +130,6 @@ class MPO(object):
             if sampled_actions is None:
                 
                 sampled_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch = state_batch, sample_num = sample_num)
-            
             else:
 
                 #Check for correct dimensions
@@ -146,38 +148,61 @@ class MPO(object):
         # Dual function returns a scalar that we differentiate w.r.t. eta
         norm_target_q, loss_temperature = self.compute_weights_temperature_loss(eta_tensor, target_q, self.eps_dual)
         loss_dual = loss_temperature
+        
+        stats = {
+            "eta_dual": float(self.eta),
+            "norm_target_q_mean": norm_target_q.mean().detach().item(),
+            "norm_target_q_min":  norm_target_q.min().detach().item(),
+            "norm_target_q_max":  norm_target_q.max().detach().item(),
+            "loss_dual":          loss_dual.detach().item(),
+        }
 
         if self.use_action_penalty:
             eta_penalty = torch.tensor(self.eta_penalty, device=self.device, requires_grad=True)
             # Compute action penalty when out of bound:
             actions_squashed  = torch.max(torch.min(sampled_actions, self.action_space_high), self.action_space_low)
             diff_out_of_bound = sampled_actions - actions_squashed
-            cost_out_of_bound = -torch.linalg.norm(diff_out_of_bound, dim=-1)
+            has_out_of_bound = diff_out_of_bound.abs().max().item() > 0
+            # Only if action is out of bound
+            if has_out_of_bound:
+                cost_out_of_bound = - (diff_out_of_bound.pow(2).sum(dim=-1))   # quadratic
+                # print("out of bound!")
+                penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(eta_penalty, cost_out_of_bound, self.eps_penalty)
 
-            penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(eta_penalty, cost_out_of_bound, self.eps_penalty)
-
-            norm_target_q += penalty_normalized_weights
-            norm_target_q = norm_target_q / (norm_target_q.sum(dim=0, keepdim=True) + 1e-8)
-            loss_dual += loss_penalty_temperature
+                norm_target_q += penalty_normalized_weights
+                norm_target_q = norm_target_q / (norm_target_q.sum(dim=0, keepdim=True) + 1e-8)
+                loss_dual += loss_penalty_temperature 
+                
 
         loss_dual.backward()
 
         with torch.no_grad():
             # Gradient descent update on eta
-            self.eta = float(torch.clamp(eta_tensor - self.eta_lr * eta_tensor.grad, min=1e-6).item())
-            if self.use_action_penalty:
-                self.eta_penalty = float(torch.clamp(eta_penalty - self.eta_penalty_lr * eta_penalty.grad, min=1e-6).item())
-        
-        
+            self.eta = float(torch.clamp(eta_tensor - self.eta_lr * eta_tensor.grad, min=1e-3).item())
+            if self.use_action_penalty and has_out_of_bound:
+                self.eta_penalty = float(torch.clamp(eta_penalty - self.eta_penalty_lr * eta_penalty.grad, min=1e-3).item())
+    
 
-        stats = {"eta_dual": float(self.eta)}
 
-        if self.use_action_penalty:
+        if self.use_action_penalty and has_out_of_bound :
             stats.update({
                 "eta_penalty": float(self.eta_penalty),
-                "penalty_mean": float(cost_out_of_bound.mean().item()),
-                "penalty_min": float(cost_out_of_bound.min().item()),
-                "penalty_max": float(cost_out_of_bound.max().item()),
+
+                # diff stats (better as abs)
+                "diff_out_abs_mean": diff_out_of_bound.abs().mean().detach().item(),
+                "diff_out_abs_max":  diff_out_of_bound.abs().max().detach().item(),
+
+                # combined weights stats
+                "norm_weights_mean": norm_target_q.mean().detach().item(),
+                "norm_weights_min":  norm_target_q.min().detach().item(),
+                "norm_weights_max":  norm_target_q.max().detach().item(),
+
+                # penalty-only weights stats
+                "penalty_weights_mean": penalty_normalized_weights.mean().detach().item(),
+                "penalty_weights_min":  penalty_normalized_weights.min().detach().item(),
+                "penalty_weights_max":  penalty_normalized_weights.max().detach().item(),
+
+                "loss_penalty": loss_penalty_temperature.detach().item(),
             })
 
         return sampled_actions, norm_target_q, b_mu, b_std, stats
@@ -379,6 +404,8 @@ class MPO(object):
         log_mean_exp = torch.log(exp_term.mean(dim=1) + 1e-8)  # (B,)
 
         dual_loss = temperature * epsilon + max_v.mean() + temperature * log_mean_exp.mean()
+
+
         return weights, dual_loss
     
     # def dual_function(self, eta, target_q):
