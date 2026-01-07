@@ -148,11 +148,13 @@ def train_loop(
                 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()
+                collect_stats = args.wandb_track and (i_update % args.log_period == 0)
                 sampled_actions, norm_target_q, b_mu, b_A, stats_e_step = mpo.expectation_step(
                     state_batch =state_batch, 
                     sampled_actions=sampled_actions, 
                     b_mu = b_mu, 
-                    b_std = b_std
+                    b_std = b_std,
+                    collect_stats = collect_stats
                     )
                 
                 t_E_step_end = time.perf_counter()         
@@ -214,28 +216,28 @@ def train_loop(
                 writer.add_scalar("m-step/mu_max", stats_m["mu_max"], grad_updates)
                 
                 # E-Step Logging
-                writer.add_scalar("e-step/eta_dual", stats_e_step["eta_dual"], grad_updates)
+                writer.add_scalar("e-step/eta_dual", stats_e_step["eta_dual"].item(), grad_updates)
                 # weights diagnostics (always present)
-                writer.add_scalar("e-step/norm_target_q_mean", stats_e_step["norm_target_q_mean"], grad_updates)
-                writer.add_scalar("e-step/norm_target_q_min",  stats_e_step["norm_target_q_min"],  grad_updates)
-                writer.add_scalar("e-step/norm_target_q_max",  stats_e_step["norm_target_q_max"],  grad_updates)
-                writer.add_scalar("e-step/loss_dual",          stats_e_step["loss_dual"],          grad_updates)
+                writer.add_scalar("e-step/norm_target_q_mean", stats_e_step["norm_target_q_mean"].item(), grad_updates)
+                writer.add_scalar("e-step/norm_target_q_min",  stats_e_step["norm_target_q_min"].item(),  grad_updates)
+                writer.add_scalar("e-step/norm_target_q_max",  stats_e_step["norm_target_q_max"].item(),  grad_updates)
+                writer.add_scalar("e-step/loss_dual",          stats_e_step["loss_dual"].item(),          grad_updates)
                 # optional: only if action penalty is enabled / present in stats
                 if "eta_penalty" in stats_e_step:
-                    writer.add_scalar("e-step/eta_penalty", stats_e_step["eta_penalty"], grad_updates)
+                    writer.add_scalar("e-step/eta_penalty", stats_e_step["eta_penalty"].item(), grad_updates)
 
-                    writer.add_scalar("e-step/diff_out_abs_mean", stats_e_step["diff_out_abs_mean"], grad_updates)
-                    writer.add_scalar("e-step/diff_out_abs_max",  stats_e_step["diff_out_abs_max"],  grad_updates)
+                    writer.add_scalar("e-step/diff_out_abs_mean", stats_e_step["diff_out_abs_mean"].item(), grad_updates)
+                    writer.add_scalar("e-step/diff_out_abs_max",  stats_e_step["diff_out_abs_max"].item(),  grad_updates)
 
-                    writer.add_scalar("e-step/norm_weights_mean", stats_e_step["norm_weights_mean"], grad_updates)
-                    writer.add_scalar("e-step/norm_weights_min",  stats_e_step["norm_weights_min"],  grad_updates)
-                    writer.add_scalar("e-step/norm_weights_max",  stats_e_step["norm_weights_max"],  grad_updates)
+                    writer.add_scalar("e-step/norm_weights_mean", stats_e_step["norm_weights_mean"].item(), grad_updates)
+                    writer.add_scalar("e-step/norm_weights_min",  stats_e_step["norm_weights_min"].item(),  grad_updates)
+                    writer.add_scalar("e-step/norm_weights_max",  stats_e_step["norm_weights_max"].item(),  grad_updates)
 
-                    writer.add_scalar("e-step/penalty_weights_mean", stats_e_step["penalty_weights_mean"], grad_updates)
-                    writer.add_scalar("e-step/penalty_weights_min",  stats_e_step["penalty_weights_min"],  grad_updates)
-                    writer.add_scalar("e-step/penalty_weights_max",  stats_e_step["penalty_weights_max"],  grad_updates)
+                    writer.add_scalar("e-step/penalty_weights_mean", stats_e_step["penalty_weights_mean"].item(), grad_updates)
+                    writer.add_scalar("e-step/penalty_weights_min",  stats_e_step["penalty_weights_min"].item(),  grad_updates)
+                    writer.add_scalar("e-step/penalty_weights_max",  stats_e_step["penalty_weights_max"].item(),  grad_updates)
 
-                    writer.add_scalar("e-step/loss_penalty", stats_e_step["loss_penalty"], grad_updates)
+                    writer.add_scalar("e-step/loss_penalty", stats_e_step["loss_penalty"].item(), grad_updates)
 
 
                 # Retrace Logging

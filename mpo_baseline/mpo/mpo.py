@@ -90,7 +90,8 @@ class MPO(object):
 
         # Dual variables / Lagrange multipliers and counters
         # Temperature parameter for MPO E-step (initialized randomly)
-        self.eta = args.init_eta_dual
+        self.eta_dual = torch.tensor(args.init_eta_dual, device=self.device, dtype=torch.float32, requires_grad=True)
+        self.eta_penalty = torch.tensor(args.init_eta_dual, device=self.device, dtype=torch.float32, requires_grad=True)
 
         self.log_dir = args.log_dir
         self.model_dir = os.path.join(self.log_dir, "model")
@@ -103,7 +104,6 @@ class MPO(object):
         self.use_action_penalty = args.use_action_penalty
         self.eps_penalty = getattr(args, "eps_penalty", 1e-3)     # ähnlich Acme default
         self.eta_penalty_lr = getattr(args, "eta_penalty_lr", self.eta_lr)
-        self.eta_penalty = self.eta
         self.lam = args.penalty_mix
                           
         
@@ -113,7 +113,7 @@ class MPO(object):
         self.eta_sigma = torch.full((self.action_dim,), args.init_eta_sigma, device=self.device, dtype=torch.float32)
 
     
-    def expectation_step(self, state_batch, sampled_actions = None, b_mu = None, b_std= None):
+    def expectation_step(self, state_batch, sampled_actions = None, b_mu = None, b_std= None, collect_stats: bool=False):
         """
         E-step of MPO:
         - Sample actions from the target policy for each state.
@@ -142,12 +142,19 @@ class MPO(object):
                 expanded_states.reshape(-1, self.state_dim), sampled_actions.reshape(-1, self.action_dim)  # (sample_num * B, action_dim)
             ).reshape(sample_num, B)
         
-        # Treat target_q as constant w.r.t. eta (no gradients from critic/actor)
-        eta_tensor = torch.tensor(self.eta, device=self.device, requires_grad=True)
+        if self.eta_dual.grad is not None:
+            self.eta_dual.grad = None
+        if self.use_action_penalty and self.eta_penalty.grad is not None:
+            self.eta_penalty.grad = None
 
         # Dual function returns a scalar that we differentiate w.r.t. eta
-        norm_target_q, loss_temperature = self.compute_weights_temperature_loss(eta_tensor, target_q, self.eps_dual)
+        norm_target_q, loss_temperature = self.compute_weights_temperature_loss(self.eta_dual, target_q, self.eps_dual)
         loss_dual = loss_temperature
+
+        has_oob = None
+        penalty_normalized_weights = None
+        loss_penalty_temperature = None
+        diff_out_of_bound = None
         
         stats = {
             "eta_dual": float(self.eta),
@@ -158,52 +165,59 @@ class MPO(object):
         }
 
         if self.use_action_penalty:
-            eta_penalty = torch.tensor(self.eta_penalty, device=self.device, requires_grad=True)
             # Compute action penalty when out of bound:
             actions_squashed  = torch.max(torch.min(sampled_actions, self.action_space_high), self.action_space_low)
             diff_out_of_bound = sampled_actions - actions_squashed
-            has_out_of_bound = diff_out_of_bound.abs().max().item() > 0
-            # Only if action is out of bound
-            if has_out_of_bound:
-                cost_out_of_bound = - (diff_out_of_bound.pow(2).sum(dim=-1))   # quadratic
-                # print("out of bound!")
-                penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(eta_penalty, cost_out_of_bound, self.eps_penalty)
+            has_oob = (diff_out_of_bound.abs().amax() > 0).to(norm_target_q.dtype)
+            
+            cost_out_of_bound = -(diff_out_of_bound.pow(2).sum(dim=-1))  # (N,B)
+            penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(
+                self.eta_penalty, cost_out_of_bound, self.eps_penalty
+                )
 
-                norm_target_q = (1- self.lam) *norm_target_q + self.lam * penalty_normalized_weights
-                norm_target_q = norm_target_q / (norm_target_q.sum(dim=0, keepdim=True) + 1e-8)
-                loss_dual = (1-self.lam) *loss_dual + self.lam * loss_penalty_temperature 
-                
+            penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(eta_penalty, cost_out_of_bound, self.eps_penalty)
+            lam_eff = self.lam * has_oob
+
+            norm_target_q = (1 - lam_eff) * norm_target_q + lam_eff * penalty_normalized_weights
+            norm_target_q = norm_target_q / (norm_target_q.sum(dim=0, keepdim=True) + 1e-8)
+            loss_dual = (1 - lam_eff) * loss_dual + lam_eff * loss_penalty_temperature
+            
 
         loss_dual.backward()
 
         with torch.no_grad():
             # Gradient descent update on eta
-            self.eta = float(torch.clamp(eta_tensor - self.eta_lr * eta_tensor.grad, min=1e-3).item())
-            if self.use_action_penalty and has_out_of_bound:
-                self.eta_penalty = float(torch.clamp(eta_penalty - self.eta_penalty_lr * eta_penalty.grad, min=1e-3).item())
-    
+            self.eta_dual.add_(-self.eta_lr * self.eta_dual.grad)
+            self.eta_dual.clamp_(min=1e-3)
+            self.eta_dual.grad = None
+            
+            if self.use_action_penalty:
+                # if has_oob=0, grad is effective 0 cause lam_eff=0 -> no Update
+                self.eta_penalty.add_(-self.eta_penalty_lr * self.eta_penalty.grad)
+                self.eta_penalty.clamp_(min=1e-3)
+                self.eta_penalty.grad = None
 
+        stats = None
+        if collect_stats:
+            stats = {
+                "eta_dual": self.eta_dual.detach(),
+                "norm_target_q_mean": norm_target_q.detach().mean(),
+                "norm_target_q_min":  norm_target_q.detach().amin(),
+                "norm_target_q_max":  norm_target_q.detach().amax(),
+                "loss_dual":          loss_dual.detach(),
+            }
 
-        if self.use_action_penalty and has_out_of_bound :
-            stats.update({
-                "eta_penalty": float(self.eta_penalty),
-
-                # diff stats (better as abs)
-                "diff_out_abs_mean": diff_out_of_bound.abs().mean().detach().item(),
-                "diff_out_abs_max":  diff_out_of_bound.abs().max().detach().item(),
-
-                # combined weights stats
-                "norm_weights_mean": norm_target_q.mean().detach().item(),
-                "norm_weights_min":  norm_target_q.min().detach().item(),
-                "norm_weights_max":  norm_target_q.max().detach().item(),
-
-                # penalty-only weights stats
-                "penalty_weights_mean": penalty_normalized_weights.mean().detach().item(),
-                "penalty_weights_min":  penalty_normalized_weights.min().detach().item(),
-                "penalty_weights_max":  penalty_normalized_weights.max().detach().item(),
-
-                "loss_penalty": loss_penalty_temperature.detach().item(),
-            })
+            if self.use_action_penalty:
+                stats.update({
+                    "eta_penalty": self.eta_penalty.detach(),
+                    "has_out_of_bound": has_oob.detach() if has_oob is not None else None,
+                    "diff_out_abs_mean": diff_out_of_bound.detach().abs().mean(),
+                    "diff_out_abs_max":  diff_out_of_bound.detach().abs().amax(),
+                    "penalty_weights_mean": penalty_normalized_weights.detach().mean(),
+                    "penalty_weights_min":  penalty_normalized_weights.detach().amin(),
+                    "penalty_weights_max":  penalty_normalized_weights.detach().amax(),
+                    "loss_penalty":         loss_penalty_temperature.detach() if loss_penalty_temperature is not None else None,
+                })
 
         return sampled_actions, norm_target_q, b_mu, b_std, stats
     
@@ -297,6 +311,7 @@ class MPO(object):
             
             sampled_actions, sampled_next_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch, next_state_batch , sample_num = 20)
             expanded_next_states = next_state_batch[None,:, :].expand(sample_num,-1, -1)  # (sample_num, B, state_dim)
+            
             
             ## get expected Q value from target critic
             expected_next_q = self.target_critic.forward(
