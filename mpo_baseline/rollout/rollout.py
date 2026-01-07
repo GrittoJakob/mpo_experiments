@@ -1,5 +1,6 @@
 import gymnasium as gym
 import torch
+import numpy as np
 
 
 def collect_rollout(env, args, actor, replaybuffer, device):
@@ -27,6 +28,8 @@ def collect_rollout(env, args, actor, replaybuffer, device):
                     # Get action from actor
                     # NOTE: Actor.action already returns a NumPy array
                     action = actor.action(state_tensor)
+                    if args.use_action_clipping:
+                        action = np.clip(action, args.action_space_low, args.action_space_high)
 
                     # Step the environment
                     next_state, reward, terminated, truncated, info = env.step(action)

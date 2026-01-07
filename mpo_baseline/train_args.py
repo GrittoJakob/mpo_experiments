@@ -23,11 +23,11 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 50
     "number of global updates per log to wandb"
-    num_threads: int = 16  
+    num_threads: int = 4 
     """number of threads to use"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
@@ -65,9 +65,9 @@ class Args:
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
     alpha_var_scale: float = 0.1
     """learning rate / scale factor for updating eta_sigma (variance KL Lagrange multiplier)"""
-    alpha_mean_max: float = 0.1
+    alpha_mean_max: float = 0.4
     """maximum clamp value for eta_mu (mean KL Lagrange multiplier)"""
-    alpha_var_max: float = 1.0
+    alpha_var_max: float = 3.0
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
     q_loss_type: str = 'mse'
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
@@ -93,8 +93,12 @@ class Args:
     """flag for using action penalty"""
     eps_penalty:float = 1e-3
     """constrain for action penalty loss term"""
-    penalty_mix: float = 0.1
+    penalty_mix: float = 0.5
     """parameter for mixing dual_losses in E-Step (action penalty and normal dual loss)"""
+    use_action_clipping: bool = True
+    """whether to use action clipping in rollout to save clipped action or not"""
+    use_tanh_on_mean:bool = True
+    """use tanh on mean in actor after last layer"""
 
     # ===============================
     # Sampling / Replay Buffer

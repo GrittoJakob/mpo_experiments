@@ -143,6 +143,7 @@ def train_loop(
             t_policy_eval_end = time.perf_counter()    
             runtime_policy_eval += t_policy_eval_end - t_policy_eval_start
 
+
             if i_update % args.delay_policy_update == 0:
                 
                 # E-step (build non-parametric target distribution)
@@ -242,6 +243,11 @@ def train_loop(
                 writer.add_scalar("critic_update/q_current_mean", critic_update_stats["q_current_mean"], grad_updates)
                 writer.add_scalar("critic_update/q_target_mean", critic_update_stats["q_target_mean"], grad_updates)
 
+            # Target network update & logging
+            # Periodically sync target networks with current actor/critic
+            if grad_updates % args.target_update_period == 0:
+                mpo.update_target_actor_critic()
+
 
         # Evaluation in the outer loop
         if it % args.evaluate_period == 0:
@@ -254,11 +260,6 @@ def train_loop(
             mpo.actor.train()
             t_eval_end = time.perf_counter()
             runtime_eval += t_eval_end -t_eval_start 
-
-        # Target network update & logging
-        # Periodically sync target networks with current actor/critic
-        if grad_updates % args.target_update_period == 0:
-            mpo.update_target_actor_critic()
 
         # if it % args.save_every == 0:
         #     mpo.save(it)

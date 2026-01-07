@@ -15,6 +15,7 @@ class Actor(nn.Module):
         self._printed_init_cov = False
         self.use_state_dependent_var = args.use_state_dependent_var
         std_init = args.std_init
+        self.use_tanh_on_mean = args.use_tanh_on_mean
         
 
         self.backbone = nn.Sequential(
@@ -27,6 +28,8 @@ class Actor(nn.Module):
 
         # zwei getrennte Köpfe
         self.mean_layer = nn.Linear(self.hs, self.da)
+        if self.use_tanh_on_mean:
+            self.activation_layer_mean = nn.Tanh()
                # inverse Softplus helper
         def softplus_inv(y):
             return torch.log(torch.exp(torch.tensor(y)) - 1.0)
@@ -55,12 +58,14 @@ class Actor(nn.Module):
         
         #Mean Kopf
         mean = self.mean_layer(x)   # (B, da)
+        if self.use_tanh_on_mean:
+            mean = self.activation_layer_mean(mean)
         
         if self.use_state_dependent_var:
             std = F.softplus(self.std_layer(x))    # (B, da)
         
         else:
-            std = std.log_std
+            std = self.log_std
 
         #Debug: Print variance
         if not self._printed_init_cov:

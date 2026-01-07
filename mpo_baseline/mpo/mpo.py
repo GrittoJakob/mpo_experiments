@@ -169,9 +169,9 @@ class MPO(object):
                 # print("out of bound!")
                 penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(eta_penalty, cost_out_of_bound, self.eps_penalty)
 
-                norm_target_q += penalty_normalized_weights
+                norm_target_q = (1- self.lam) *norm_target_q + self.lam * penalty_normalized_weights
                 norm_target_q = norm_target_q / (norm_target_q.sum(dim=0, keepdim=True) + 1e-8)
-                loss_dual += loss_penalty_temperature 
+                loss_dual = (1-self.lam) *loss_dual + self.lam * loss_penalty_temperature 
                 
 
         loss_dual.backward()

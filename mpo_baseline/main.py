@@ -88,6 +88,11 @@ def train():
     # Create ReplayBuffer
     replaybuffer = ReplayBuffer(args.max_replay_buffer)
 
+    # action space
+    action_space = train_env.unwrapped.action_space
+    args.action_space_low  = action_space.low
+    args.action_space_high = action_space.high
+    print("action space:", args.action_space_low, args.action_space_high)
     mpo = MPO(args,train_env, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device) 
     
     #  compile warmup 
