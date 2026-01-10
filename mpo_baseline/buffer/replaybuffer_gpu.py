@@ -1,22 +1,20 @@
-import torch
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
+import torch
+from collections import deque
+from typing import Any, Deque, List, Optional, Sequence, Tuple
 
 
 class ReplayBufferGPU:
     """
-    Episodic replay buffer on GPU.
+    Episodic replay buffer with a flat ring-buffer on GPU.
 
-    - Stores complete episodes (only after done_episode/store_episodes), like your CPU version.
-    - Keeps a flat transition ring-buffer on GPU (preallocated) for fast sampling.
-    - Evicts whole episodes from the front to stay under max_transitions.
+    Stores transitions:
+      (state, action, next_state, reward, terminated, truncated)
 
-    API mirrors the CPU buffer:
-      store_step, done_episode, store_episodes
-      sample_batch, sample_batch_stacked, batch_get
-      __len__, __getitem__
-      mean_reward, mean_return
-      + mean_episode_length (new)
+    Key points:
+    - Stores full episodes (all transitions, no "L-1" trimming).
+    - Evicts whole episodes (FIFO) to respect max_transitions.
+    - Sampling is uniform over stored transitions.
     """
 
     def __init__(
@@ -29,57 +27,67 @@ class ReplayBufferGPU:
         self.device = torch.device(device)
         self.dtype = dtype
 
-        # Lazy init shapes on first episode
+        # Lazy init shapes
         self._state_dim: Optional[int] = None
         self._action_dim: Optional[int] = None
 
-        # Flat ring buffer storage (allocated lazily)
+        # Flat ring buffers (allocated lazily)
         self._states: Optional[torch.Tensor] = None
         self._actions: Optional[torch.Tensor] = None
         self._next_states: Optional[torch.Tensor] = None
-        self._rewards: Optional[torch.Tensor] = None  # (N, 1)
+        self._rewards: Optional[torch.Tensor] = None          # (N, 1)
+        self._terminated: Optional[torch.Tensor] = None       # (N, 1) float32 0/1
+        self._truncated: Optional[torch.Tensor] = None        # (N, 1) float32 0/1
 
-        # Ring pointers (logical buffer has [start .. start+size) mod N)
+        # Ring pointers: logical window is [start .. start+size) modulo N
         self._start: int = 0
         self._size: int = 0
 
-        # Episode metadata (FIFO order of stored episodes)
-        # Each entry: (usable_len, return_sum, mean_reward)
-        self._episodes_meta: List[Tuple[int, float, float]] = []
+        # Episode FIFO metadata: (length, return_sum, mean_reward)
+        self._episodes: Deque[Tuple[int, float, float]] = deque()
 
-        # Temporary episode storage (CPU objects or tensors) until done_episode
-        self.tmp_episode_buff: List[Tuple[Any, Any, Any, Any]] = []
+        # Optional step-wise API (kept for compatibility)
+        self.tmp_episode_buff: List[Tuple[Any, Any, Any, Any, Any, Any]] = []
 
-    # ---------- Internal helpers ----------
+    # -------------------- Internal helpers --------------------
 
-    def _ensure_allocated(self, state_example, action_example):
+    def _ensure_allocated(self, state_example, action_example) -> None:
         if self._states is not None:
             return
 
-        # Infer dims
-        s = torch.as_tensor(state_example)
-        a = torch.as_tensor(action_example)
-
-        if s.ndim != 1:
-            s = s.reshape(-1)
-        if a.ndim != 1:
-            a = a.reshape(-1)
-
+        s = torch.as_tensor(state_example).reshape(-1)
+        a = torch.as_tensor(action_example).reshape(-1)
         self._state_dim = int(s.numel())
         self._action_dim = int(a.numel())
 
-        N = self.max_transitions
-        sd, ad = self._state_dim, self._action_dim
+        N, sd, ad = self.max_transitions, self._state_dim, self._action_dim
 
         self._states = torch.empty((N, sd), device=self.device, dtype=self.dtype)
         self._actions = torch.empty((N, ad), device=self.device, dtype=self.dtype)
         self._next_states = torch.empty((N, sd), device=self.device, dtype=self.dtype)
         self._rewards = torch.empty((N, 1), device=self.device, dtype=self.dtype)
+        self._terminated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
+        self._truncated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
 
-    def _write_block(self, buf: torch.Tensor, data: torch.Tensor, write_pos: int):
-        """
-        Write `data` (T, D) into ring buffer `buf` starting at write_pos (mod N).
-        """
+    @staticmethod
+    def _to_2d(x: torch.Tensor) -> torch.Tensor:
+        if x.ndim == 1:
+            return x.unsqueeze(0)
+        return x
+
+    @staticmethod
+    def _to_col(x: torch.Tensor) -> torch.Tensor:
+        # shape -> (L,1)
+        if x.ndim == 0:
+            return x.view(1, 1)
+        if x.ndim == 1:
+            return x.view(-1, 1)
+        if x.ndim == 2 and x.shape[1] != 1:
+            return x.reshape(-1, 1)
+        return x
+
+    def _write_block(self, buf: torch.Tensor, data: torch.Tensor, write_pos: int) -> None:
+        """Write (T,D) data into ring buffer starting at write_pos (mod N)."""
         N = buf.shape[0]
         T = data.shape[0]
         if T <= 0:
@@ -92,114 +100,105 @@ class ReplayBufferGPU:
             buf[write_pos:] = data[:end_space]
             buf[: T - end_space] = data[end_space:]
 
-    def _evict_oldest_episode(self):
-        """
-        Remove the oldest stored episode (whole episode), updating ring pointers & meta.
-        """
-        if not self._episodes_meta:
+    def _evict_one_episode(self) -> None:
+        """Evict the oldest episode (FIFO)."""
+        if not self._episodes:
             return
-        ep_len, _, _ = self._episodes_meta.pop(0)
-        # advance start and shrink size
+        ep_len, _, _ = self._episodes.popleft()
         self._start = (self._start + ep_len) % self.max_transitions
         self._size -= ep_len
         if self._size < 0:
             self._size = 0
 
-    def _ensure_capacity_for(self, extra: int):
-        """
-        Ensure we have room for `extra` more transitions by evicting whole episodes.
-        """
-        # If episode itself is larger than capacity, keep only the last part of it.
-        if extra > self.max_transitions:
-            # wipe all existing episodes
-            self._episodes_meta.clear()
+    def _ensure_capacity_for(self, extra: int) -> None:
+        """Evict episodes until we have room for `extra` transitions."""
+        if extra <= 0:
+            return
+
+        # If an incoming episode is longer than total capacity: keep only its last part.
+        if extra >= self.max_transitions:
+            self._episodes.clear()
             self._start = 0
             self._size = 0
             return
 
-        while self._size + extra > self.max_transitions and self._episodes_meta:
-            self._evict_oldest_episode()
+        while self._size + extra > self.max_transitions and self._episodes:
+            self._evict_one_episode()
 
-        # If still too big (shouldn't happen unless meta empty), reset
-        if self._size + extra > self.max_transitions and not self._episodes_meta:
+        # If still too big (shouldn't happen often), hard reset
+        if self._size + extra > self.max_transitions and not self._episodes:
             self._start = 0
             self._size = 0
 
-    def _append_episode_tensors(
+    def _append_episode(
         self,
         states: torch.Tensor,
         actions: torch.Tensor,
         next_states: torch.Tensor,
         rewards: torch.Tensor,
-    ):
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+    ) -> None:
         """
-        states/actions/next_states/rewards are (L, dim) tensors on any device.
-        We'll store only usable_len = max(L-1, 0) transitions (to mirror CPU code).
+        Append one episode (L transitions) into the GPU ring buffer.
+        Tensors can be on CPU or GPU; we copy episode-wise once.
         """
         L = int(states.shape[0])
-        usable_len = max(L - 1, 0)
-        if usable_len == 0:
+        if L <= 0:
             return
 
-        # Keep only first usable transitions
-        states = states[:usable_len]
-        actions = actions[:usable_len]
-        next_states = next_states[:usable_len]
-        rewards = rewards[:usable_len]
+        # If episode too long, keep only the last (max_transitions-1) or so is handled by _ensure_capacity_for.
+        if L >= self.max_transitions:
+            # Keep only last max_transitions-1 transitions (since extra==max_transitions triggers reset above)
+            # More simply: keep last (max_transitions - 1) transitions to satisfy extra < max_transitions.
+            keep = self.max_transitions - 1
+            states = states[-keep:]
+            actions = actions[-keep:]
+            next_states = next_states[-keep:]
+            rewards = rewards[-keep:]
+            terminated = terminated[-keep:]
+            truncated = truncated[-keep:]
+            L = keep
 
-        # If episode too long, keep only the last max_transitions transitions
-        if usable_len > self.max_transitions:
-            states = states[-self.max_transitions :]
-            actions = actions[-self.max_transitions :]
-            next_states = next_states[-self.max_transitions :]
-            rewards = rewards[-self.max_transitions :]
-            usable_len = self.max_transitions
-            # wipe everything else (to mirror "ensure capacity" behavior)
-            self._episodes_meta.clear()
-            self._start = 0
-            self._size = 0
-
-        # Make sure storage exists
+        # Allocate on first use
         self._ensure_allocated(states[0], actions[0])
 
-        # Move to device/dtype once (episode-wise copy is much cheaper than per-step)
-        states = states.to(device=self.device, dtype=self.dtype, non_blocking=True)
-        actions = actions.to(device=self.device, dtype=self.dtype, non_blocking=True)
-        next_states = next_states.to(device=self.device, dtype=self.dtype, non_blocking=True)
-        rewards = rewards.to(device=self.device, dtype=self.dtype, non_blocking=True)
-
-        # Ensure capacity and compute write position
-        self._ensure_capacity_for(usable_len)
+        # Ensure capacity (evict whole episodes)
+        self._ensure_capacity_for(L)
         write_pos = (self._start + self._size) % self.max_transitions
 
-        # Write data
+        # Move once per episode to GPU
+        states_g = states.to(self.device, dtype=self.dtype, non_blocking=True)
+        actions_g = actions.to(self.device, dtype=self.dtype, non_blocking=True)
+        next_states_g = next_states.to(self.device, dtype=self.dtype, non_blocking=True)
+        rewards_g = rewards.to(self.device, dtype=self.dtype, non_blocking=True)
+        terminated_g = terminated.to(self.device, dtype=self.dtype, non_blocking=True)
+        truncated_g = truncated.to(self.device, dtype=self.dtype, non_blocking=True)
+
         assert self._states is not None
         assert self._actions is not None
         assert self._next_states is not None
         assert self._rewards is not None
+        assert self._terminated is not None
+        assert self._truncated is not None
 
-        self._write_block(self._states, states, write_pos)
-        self._write_block(self._actions, actions, write_pos)
-        self._write_block(self._next_states, next_states, write_pos)
+        self._write_block(self._states, states_g, write_pos)
+        self._write_block(self._actions, actions_g, write_pos)
+        self._write_block(self._next_states, next_states_g, write_pos)
+        self._write_block(self._rewards, rewards_g, write_pos)
+        self._write_block(self._terminated, terminated_g, write_pos)
+        self._write_block(self._truncated, truncated_g, write_pos)
 
-        # rewards to shape (T,1)
-        if rewards.ndim == 1:
-            rewards = rewards.unsqueeze(-1)
-        elif rewards.ndim == 2 and rewards.shape[1] != 1:
-            rewards = rewards.reshape(-1, 1)
-        self._write_block(self._rewards, rewards, write_pos)
-
-        # Update meta and size (meta values kept as Python floats for cheap stats)
         ep_return = float(rewards.sum().detach().cpu())
         ep_mean_reward = float(rewards.mean().detach().cpu())
-        self._episodes_meta.append((usable_len, ep_return, ep_mean_reward))
-        self._size += usable_len
+        self._episodes.append((L, ep_return, ep_mean_reward))
+        self._size += L
 
-    # ---------- Storage ----------
+    # -------------------- Storage API --------------------
 
-    def store_step(self, state, action, next_state, reward):
-        # Keep raw objects; we will bulk-transfer on done_episode()
-        self.tmp_episode_buff.append((state, action, next_state, reward))
+    def store_step(self, state, action, next_state, reward, terminated=False, truncated=False):
+        """Optional step-wise API (kept for compatibility)."""
+        self.tmp_episode_buff.append((state, action, next_state, reward, terminated, truncated))
 
     def done_episode(self):
         if not self.tmp_episode_buff:
@@ -207,159 +206,199 @@ class ReplayBufferGPU:
         self.store_episodes([self.tmp_episode_buff])
         self.tmp_episode_buff = []
 
-    def store_episodes(self, new_episodes: Sequence[Sequence[Tuple[Any, Any, Any, Any]]]):
+    def store_episodes(self, new_episodes: Sequence[Sequence[Tuple[Any, ...]]]) -> None:
         """
         new_episodes: list of episodes
-          Each episode: list of (state, action, next_state, reward)
+          Each episode: list of tuples:
+            (state, action, next_state, reward, terminated, truncated)
+          For backwards compatibility, 4-tuples are accepted and treated as terminated=0, truncated=0.
         """
         for episode in new_episodes:
             if len(episode) == 0:
                 continue
 
-            states, actions, next_states, rewards = zip(*episode)
+            # Backward compatible unpacking
+            if len(episode[0]) == 4:
+                states, actions, next_states, rewards = zip(*episode)
+                terminated = [0.0] * len(rewards)
+                truncated = [0.0] * len(rewards)
+            else:
+                states, actions, next_states, rewards, terminated, truncated = zip(*episode)
 
-            # Convert to torch tensors on CPU first (cheap), then move once per episode
-            states = torch.as_tensor(states, dtype=self.dtype)
-            actions = torch.as_tensor(actions, dtype=self.dtype)
-            next_states = torch.as_tensor(next_states, dtype=self.dtype)
-            rewards = torch.as_tensor(rewards, dtype=self.dtype)
+            # Convert to CPU tensors first
+            states_t = self._to_2d(torch.as_tensor(states, dtype=self.dtype, device="cpu"))
+            actions_t = self._to_2d(torch.as_tensor(actions, dtype=self.dtype, device="cpu"))
+            next_states_t = self._to_2d(torch.as_tensor(next_states, dtype=self.dtype, device="cpu"))
 
-            # Ensure 2D shapes
-            if states.ndim == 1:
-                states = states.unsqueeze(0)
-            if actions.ndim == 1:
-                actions = actions.unsqueeze(0)
-            if next_states.ndim == 1:
-                next_states = next_states.unsqueeze(0)
+            rewards_t = self._to_col(torch.as_tensor(rewards, dtype=self.dtype, device="cpu"))
+            terminated_t = self._to_col(torch.as_tensor(terminated, dtype=self.dtype, device="cpu"))
+            truncated_t = self._to_col(torch.as_tensor(truncated, dtype=self.dtype, device="cpu"))
 
-            # rewards can be (L,) or (L,1)
-            if rewards.ndim == 0:
-                rewards = rewards.view(1)
-            if rewards.ndim == 1:
-                rewards = rewards.view(-1, 1)
+            self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t)
 
-            self._append_episode_tensors(states, actions, next_states, rewards)
+    def store_episode_stacked(
+        self,
+        states,
+        actions,
+        next_states,
+        rewards,
+        terminated=None,
+        truncated=None,
+    ) -> None:
+        """
+        Store one episode as stacked arrays/tensors.
 
-    # ---------- Sampling ----------
+        Required shapes:
+          states:      (L, obs_dim)
+          actions:     (L, act_dim)
+          next_states: (L, obs_dim)
+          rewards:     (L,) or (L,1)
+
+        Optional:
+          terminated:  (L,) or (L,1)  (float/bool)
+          truncated:   (L,) or (L,1)  (float/bool)
+        """
+
+        def to_cpu_tensor(x) -> torch.Tensor:
+            if isinstance(x, np.ndarray):
+                t = torch.from_numpy(x)
+            else:
+                t = torch.as_tensor(x)
+            return t.to(device="cpu", dtype=self.dtype)
+
+        states_t = self._to_2d(to_cpu_tensor(states))
+        actions_t = self._to_2d(to_cpu_tensor(actions))
+        next_states_t = self._to_2d(to_cpu_tensor(next_states))
+        rewards_t = self._to_col(to_cpu_tensor(rewards))
+
+        L = int(states_t.shape[0])
+        if terminated is None:
+            terminated_t = torch.zeros((L, 1), dtype=self.dtype, device="cpu")
+        else:
+            terminated_t = self._to_col(to_cpu_tensor(terminated))
+
+        if truncated is None:
+            truncated_t = torch.zeros((L, 1), dtype=self.dtype, device="cpu")
+        else:
+            truncated_t = self._to_col(to_cpu_tensor(truncated))
+
+        self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t)
+
+    # -------------------- Sampling API --------------------
+
+    def __len__(self) -> int:
+        return self._size
 
     def _sample_indices(self, batch_size: int, replace: bool) -> torch.Tensor:
-        buffer_size = len(self)
-        if buffer_size == 0:
+        if self._size <= 0:
             raise ValueError("ReplayBuffer is empty.")
 
-        if (not replace) and batch_size > buffer_size:
+        if (not replace) and batch_size > self._size:
             replace = True
 
         if replace:
-            return torch.randint(0, buffer_size, (batch_size,), device=self.device)
+            return torch.randint(0, self._size, (batch_size,), device=self.device)
 
-        # Approx. unique sampling without O(N) randperm:
-        # sample extra, unique, top up if needed.
-        idx = torch.randint(0, buffer_size, (batch_size * 2,), device=self.device)
+        # Unique sampling without randperm (approximate, but fine)
+        idx = torch.randint(0, self._size, (batch_size * 2,), device=self.device)
         idx = torch.unique(idx)
         while idx.numel() < batch_size:
-            extra = torch.randint(0, buffer_size, (batch_size - idx.numel(),), device=self.device)
+            extra = torch.randint(0, self._size, (batch_size - idx.numel(),), device=self.device)
             idx = torch.unique(torch.cat([idx, extra], dim=0))
         return idx[:batch_size]
 
-    def sample_batch(self, batch_size: int, replace: bool = False):
-        idx = self._sample_indices(batch_size, replace)
-        return self.batch_get(idx)
-
-    def sample_batch_stacked(self, batch_size: int, replace: bool = False):
-        s_chunks, a_chunks, ns_chunks, r_chunks = self.sample_batch(batch_size, replace)
-        # In GPU version, chunks are torch tensors on GPU -> use torch.cat
-        return (
-            torch.cat(s_chunks, dim=0),
-            torch.cat(a_chunks, dim=0),
-            torch.cat(ns_chunks, dim=0),
-            torch.cat(r_chunks, dim=0),
-        )
-
     def batch_get(self, indices: Any):
         """
-        Fetch multiple transitions by flattened indices.
-
-        For compatibility with your CPU buffer, returns lists of chunks.
-        GPU version returns a single chunk per field (fast path).
+        For compatibility with the CPU buffer, returns chunk-lists (single chunk each).
         """
         if isinstance(indices, torch.Tensor):
             idx = indices.to(device=self.device, dtype=torch.long)
         else:
             idx = torch.as_tensor(indices, device=self.device, dtype=torch.long)
 
-        buffer_size = len(self)
-        if buffer_size == 0:
+        if self._size <= 0:
             raise ValueError("ReplayBuffer is empty.")
 
-        # Map logical index -> storage index in ring
         storage_idx = (idx + self._start) % self.max_transitions
 
         assert self._states is not None
         assert self._actions is not None
         assert self._next_states is not None
         assert self._rewards is not None
+        assert self._terminated is not None
+        assert self._truncated is not None
 
         s = self._states[storage_idx]
         a = self._actions[storage_idx]
         ns = self._next_states[storage_idx]
         r = self._rewards[storage_idx]
+        term = self._terminated[storage_idx]
+        trunc = self._truncated[storage_idx]
 
-        # Return "chunked lists" (single chunk) like CPU buffer's contract
-        return [s], [a], [ns], [r]
+        return [s], [a], [ns], [r], [term], [trunc]
 
-    # ---------- Basic API ----------
+    def sample_batch(self, batch_size: int, replace: bool = False):
+        idx = self._sample_indices(batch_size, replace)
+        return self.batch_get(idx)
 
-    def __len__(self):
-        return self._size
+    def sample_batch_stacked(self, batch_size: int, replace: bool = False):
+        s, a, ns, r, term, trunc = self.sample_batch(batch_size, replace)
+        # single chunk -> just return that tensor
+        return (
+            torch.cat(s, dim=0),
+            torch.cat(a, dim=0),
+            torch.cat(ns, dim=0),
+            torch.cat(r, dim=0),
+            torch.cat(term, dim=0),
+            torch.cat(trunc, dim=0),
+        )
 
     def __getitem__(self, idx: int):
-        if idx < 0 or idx >= len(self):
+        if idx < 0 or idx >= self._size:
             raise IndexError("ReplayBuffer index out of range")
+
         storage_idx = (self._start + int(idx)) % self.max_transitions
 
         assert self._states is not None
         assert self._actions is not None
         assert self._next_states is not None
         assert self._rewards is not None
+        assert self._terminated is not None
+        assert self._truncated is not None
 
         return (
             self._states[storage_idx],
             self._actions[storage_idx],
             self._next_states[storage_idx],
             self._rewards[storage_idx],
+            self._terminated[storage_idx],
+            self._truncated[storage_idx],
         )
 
-    # ---------- Stats ----------
+    # -------------------- Stats --------------------
 
     def mean_reward(self) -> float:
-        if not self._episodes_meta:
+        if not self._episodes:
             return 0.0
-        # Mirror CPU: mean over episodes of mean reward
-        return float(sum(mr for _, _, mr in self._episodes_meta) / len(self._episodes_meta))
+        return float(sum(mr for _, _, mr in self._episodes) / len(self._episodes))
 
     def mean_return(self) -> float:
-        if not self._episodes_meta:
+        if not self._episodes:
             return 0.0
-        # Mirror CPU: mean over episodes of total return
-        return float(sum(ret for _, ret, _ in self._episodes_meta) / len(self._episodes_meta))
+        return float(sum(ret for _, ret, _ in self._episodes) / len(self._episodes))
 
     def mean_episode_length(self) -> float:
-        """
-        Average stored episode length in transitions (usable_len = episode_len - 1).
-        """
-        if not self._episodes_meta:
+        if not self._episodes:
             return 0.0
-        return float(sum(L for L, _, _ in self._episodes_meta) / len(self._episodes_meta))
+        return float(sum(L for L, _, _ in self._episodes) / len(self._episodes))
 
-    # ---------- Save/Load ----------
+    # -------------------- Save/Load --------------------
 
     def state_dict(self) -> dict:
         """
-        Returns a CPU-serializable snapshot.
-        Note: stores the flat buffers (only the valid window) for simplicity.
+        CPU-serializable snapshot of the logical window [0..size) in order.
         """
-        if len(self) == 0:
+        if self._size == 0:
             return {
                 "max_transitions": self.max_transitions,
                 "device": str(self.device),
@@ -367,19 +406,27 @@ class ReplayBufferGPU:
                 "state_dim": self._state_dim,
                 "action_dim": self._action_dim,
                 "size": 0,
-                "episodes_meta": [],
+                "episodes": list(self._episodes),
                 "data": None,
             }
 
-        # Export the logical window [0..size) in order (CPU tensors)
         idx = torch.arange(self._size, device=self.device, dtype=torch.long)
         storage_idx = (idx + self._start) % self.max_transitions
+
+        assert self._states is not None
+        assert self._actions is not None
+        assert self._next_states is not None
+        assert self._rewards is not None
+        assert self._terminated is not None
+        assert self._truncated is not None
 
         data = {
             "states": self._states[storage_idx].detach().cpu(),
             "actions": self._actions[storage_idx].detach().cpu(),
             "next_states": self._next_states[storage_idx].detach().cpu(),
             "rewards": self._rewards[storage_idx].detach().cpu(),
+            "terminated": self._terminated[storage_idx].detach().cpu(),
+            "truncated": self._truncated[storage_idx].detach().cpu(),
         }
 
         return {
@@ -389,15 +436,16 @@ class ReplayBufferGPU:
             "state_dim": self._state_dim,
             "action_dim": self._action_dim,
             "size": self._size,
-            "episodes_meta": list(self._episodes_meta),
+            "episodes": list(self._episodes),
             "data": data,
         }
 
-    def load_state_dict(self, data: dict):
+    def load_state_dict(self, data: dict) -> None:
         self.max_transitions = int(data["max_transitions"])
         self._state_dim = data.get("state_dim", None)
         self._action_dim = data.get("action_dim", None)
-        self._episodes_meta = list(data.get("episodes_meta", []))
+
+        self._episodes = deque(data.get("episodes", []))
         self._start = 0
         self._size = int(data.get("size", 0))
 
@@ -407,137 +455,33 @@ class ReplayBufferGPU:
             self._actions = None
             self._next_states = None
             self._rewards = None
+            self._terminated = None
+            self._truncated = None
             return
 
-        # Allocate
         assert self._state_dim is not None and self._action_dim is not None
-        N = self.max_transitions
-        self._states = torch.empty((N, self._state_dim), device=self.device, dtype=self.dtype)
-        self._actions = torch.empty((N, self._action_dim), device=self.device, dtype=self.dtype)
-        self._next_states = torch.empty((N, self._state_dim), device=self.device, dtype=self.dtype)
-        self._rewards = torch.empty((N, 1), device=self.device, dtype=self.dtype)
 
-        # Load into beginning of ring
+        N, sd, ad = self.max_transitions, self._state_dim, self._action_dim
+        self._states = torch.empty((N, sd), device=self.device, dtype=self.dtype)
+        self._actions = torch.empty((N, ad), device=self.device, dtype=self.dtype)
+        self._next_states = torch.empty((N, sd), device=self.device, dtype=self.dtype)
+        self._rewards = torch.empty((N, 1), device=self.device, dtype=self.dtype)
+        self._terminated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
+        self._truncated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
+
         s = payload["states"].to(self.device, dtype=self.dtype)
         a = payload["actions"].to(self.device, dtype=self.dtype)
         ns = payload["next_states"].to(self.device, dtype=self.dtype)
         r = payload["rewards"].to(self.device, dtype=self.dtype)
+        term = payload.get("terminated", torch.zeros_like(r)).to(self.device, dtype=self.dtype)
+        trunc = payload.get("truncated", torch.zeros_like(r)).to(self.device, dtype=self.dtype)
 
         T = s.shape[0]
-        if T != self._size:
-            self._size = int(T)
+        self._size = int(T)
 
         self._states[:T] = s
         self._actions[:T] = a
         self._next_states[:T] = ns
         self._rewards[:T] = r
-
-
-    def store_episode_stacked(self, states, actions, next_states, rewards):
-        """
-        Store one episode given as stacked arrays/tensors.
-
-        Inputs:
-          states:      (L, obs_dim)  numpy or torch (CPU/GPU ok)
-          actions:     (L, act_dim)  numpy or torch
-          next_states: (L, obs_dim)  numpy or torch
-          rewards:     (L,) or (L,1) numpy or torch
-
-        Behavior matches CPU buffer:
-          usable_len = max(L - 1, 0)
-          only first usable_len transitions are stored.
-        """
-
-        # Convert to torch on CPU first (cheap, consistent)
-        if isinstance(states, np.ndarray):
-            states_t = torch.from_numpy(states)
-        else:
-            states_t = torch.as_tensor(states)
-
-        if isinstance(actions, np.ndarray):
-            actions_t = torch.from_numpy(actions)
-        else:
-            actions_t = torch.as_tensor(actions)
-
-        if isinstance(next_states, np.ndarray):
-            next_states_t = torch.from_numpy(next_states)
-        else:
-            next_states_t = torch.as_tensor(next_states)
-
-        if isinstance(rewards, np.ndarray):
-            rewards_t = torch.from_numpy(rewards)
-        else:
-            rewards_t = torch.as_tensor(rewards)
-
-        # Ensure float32-ish
-        states_t = states_t.to(dtype=self.dtype, device="cpu")
-        actions_t = actions_t.to(dtype=self.dtype, device="cpu")
-        next_states_t = next_states_t.to(dtype=self.dtype, device="cpu")
-        rewards_t = rewards_t.to(dtype=self.dtype, device="cpu")
-
-        # Ensure 2D for states/actions/next_states
-        if states_t.ndim == 1:
-            states_t = states_t.unsqueeze(0)
-        if actions_t.ndim == 1:
-            actions_t = actions_t.unsqueeze(0)
-        if next_states_t.ndim == 1:
-            next_states_t = next_states_t.unsqueeze(0)
-
-        # rewards -> (L,1)
-        if rewards_t.ndim == 0:
-            rewards_t = rewards_t.view(1, 1)
-        elif rewards_t.ndim == 1:
-            rewards_t = rewards_t.view(-1, 1)
-        elif rewards_t.ndim == 2 and rewards_t.shape[1] != 1:
-            rewards_t = rewards_t.reshape(-1, 1)
-
-        L = int(states_t.shape[0])
-        usable_len = max(L - 1, 0)
-        if usable_len == 0:
-            return
-
-        # Mirror CPU logic: keep only first usable_len
-        states_t = states_t[:usable_len]
-        actions_t = actions_t[:usable_len]
-        next_states_t = next_states_t[:usable_len]
-        rewards_t = rewards_t[:usable_len]
-
-        # Allocate on first use
-        self._ensure_allocated(states_t[0], actions_t[0])
-
-        # If episode too long, keep last max_transitions and wipe old content
-        if usable_len > self.max_transitions:
-            states_t = states_t[-self.max_transitions:]
-            actions_t = actions_t[-self.max_transitions:]
-            next_states_t = next_states_t[-self.max_transitions:]
-            rewards_t = rewards_t[-self.max_transitions:]
-            usable_len = self.max_transitions
-            self._episodes_meta.clear()
-            self._start = 0
-            self._size = 0
-
-        # Ensure capacity by evicting whole episodes
-        self._ensure_capacity_for(usable_len)
-
-        # Compute write position in ring
-        write_pos = (self._start + self._size) % self.max_transitions
-
-        # Move once per episode to GPU
-        states_g = states_t.to(self.device, non_blocking=True)
-        actions_g = actions_t.to(self.device, non_blocking=True)
-        next_states_g = next_states_t.to(self.device, non_blocking=True)
-        rewards_g = rewards_t.to(self.device, non_blocking=True)
-
-        # Write blocks
-        self._write_block(self._states, states_g, write_pos)
-        self._write_block(self._actions, actions_g, write_pos)
-        self._write_block(self._next_states, next_states_g, write_pos)
-        self._write_block(self._rewards, rewards_g, write_pos)
-
-        # Update meta + size (store meta as python floats)
-        ep_return = float(rewards_t.sum().item())
-        ep_mean_reward = float(rewards_t.mean().item())
-        self._episodes_meta.append((usable_len, ep_return, ep_mean_reward))
-        self._size += usable_len
-
-    
+        self._terminated[:T] = term
+        self._truncated[:T] = trunc

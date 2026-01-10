@@ -119,13 +119,13 @@ def train_loop(
                 replace=False  # oder True, wenn du sehr viele Updates machen willst
             )   
             sample_mbatch_start = time.time()
-            state_batch, action_batch, next_state_batch, reward_batch = sample_minibatch(
+            state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch = sample_minibatch(
                 replaybuffer=replaybuffer,
                 batch_size=args.batch_size,
                 device=device,
                 gpu_buffer=gpu_buffer,
             )
-            assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch,
+            assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch,
                     args.batch_size, mpo.state_dim, mpo.action_dim)
             sample_mbatch_end = time.time()
             runtime_sample_minibatch += sample_mbatch_end - sample_mbatch_start

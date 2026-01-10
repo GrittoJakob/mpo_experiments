@@ -35,6 +35,8 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                 
                 # Get action from actor
                 action = actor.action(state_tensor, deterministic = True)
+                if args.use_action_clipping:
+                    action = np.clip(action, args.action_space_low, args.action_space_high)
                 
                 action_list.append(action)
 

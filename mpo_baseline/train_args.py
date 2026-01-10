@@ -147,4 +147,18 @@ class Args:
     # warm up compilation
     # ===============================
     use_compile: bool = True
+    """torch.compilation flag"""
     compile_mode: str=  "default"
+    """compile mode for torch compilation"""
+
+    # ===============================
+    # Reward shaping for ant env
+    # ===============================
+    ctrl_cost_weight: float = 0.5
+    """ Weight for ctrl_cost term, default = 0.5"""
+    healthy_reward_weight: flaot = 1.0
+    """Weight for healthy_reward term, default = 1"""
+    contact_cost_weight: float = 5e-4
+    """Weight for contact_cost term, default = 5e-4"""
+    forward_reward_weight: float = 1.0
+    """Weight for forward_reward term, default = 1"""

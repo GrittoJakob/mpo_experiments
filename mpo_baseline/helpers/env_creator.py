@@ -14,19 +14,35 @@ def limit_threads(n: int):
     os.environ["NUMEXPR_NUM_THREADS"] = str(n)
 
 
-def make_train_env(env_id, seed):
-    
-    env = gym.make(env_id)
+def make_train_env(args, env_id, seed):
+    if env_id == "Ant-v5":
+        env = gym.make(
+            env_id, 
+            ctrl_cost_weight = args.ctrl_cost_weight,
+            healthy_reward = args.healthy_reward_weight, 
+            contact_cost_weights = args.contact_cost_weight,
+            forward_reward_weight = args.forward_reward_weight
+            )
+
+    else: 
+        env = gym.make(env_id)
+        
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.ClipAction(env)
     return env
 
-def make_eval_env(env_id, seed, capture_video, run_name, name_prefix="rollout"):
+def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="rollout"):
     seed_offset = seed + 1000
     if capture_video:
-        env = gym.make(env_id, render_mode="rgb_array")
+        env = gym.make(
+            env_id, 
+            render_mode="rgb_array",
+            ctrl_cost_weight = args.ctrl_cost_weight,
+            healthy_reward = args.healthy_reward_weight, 
+            contact_cost_weights = args.contact_cost_weight
+            )
 
         # in dieser (frisch erzeugten) video-env: genau Episode 0 aufnehmen
         env = gym.wrappers.RecordVideo(
@@ -36,7 +52,12 @@ def make_eval_env(env_id, seed, capture_video, run_name, name_prefix="rollout"):
             episode_trigger=lambda ep: ep == 0,
         )
     else:
-        env = gym.make(env_id)
+        env = gym.make(
+            env_id, 
+            ctrl_cost_weight = args.ctrl_cost_weight,
+            healthy_reward = args.healthy_reward_weight, 
+            contact_cost_weights = args.contact_cost_weight
+            )
 
     env.action_space.seed(seed_offset)
     env.observation_space.seed(seed_offset)

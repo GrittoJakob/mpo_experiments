@@ -28,8 +28,8 @@ def init_runname(args):
 
 
 def make_envs(args, run_name):
-    train_env = make_train_env(args.env_id, args.seed)
-    eval_env = make_eval_env(args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
+    train_env = make_train_env(args, args.env_id, args.seed)
+    eval_env = make_eval_env(args, args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
     args.obs_space = train_env.observation_space.shape[0]
     args.action_dim = train_env.action_space.shape[0]
     return train_env, eval_env

@@ -305,10 +305,14 @@ class MPO(object):
 
         return stats
 
-    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num, collect_stats):
+    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch, sample_num, collect_stats):
         B = state_batch.size(0)
         reward_batch = reward_batch.view(-1)
+        terminated_batch = terminated_batch.view(-1)
+        truncated_batch  = truncated_batch.view(-1)
         assert reward_batch.shape == (B,), f"reward_batch shape {tuple(reward_batch.shape)} expected {(B,)}"
+        assert terminated_batch.shape == (B,), f"terminated_batch shape {tuple(terminated_batch.shape)} expected {(B,)}"
+        assert truncated_batch.shape == (B,), f"truncated_batch shape {tuple(truncated_batch.shape)} expected {(B,)}"
 
         with torch.no_grad():
             
@@ -322,7 +326,8 @@ class MPO(object):
                 sampled_next_actions.reshape(-1, self.action_dim)  # (sample_num * B, action_dim)
             ).reshape(sample_num, B).mean(dim=0)  # (B,)
             
-            q_target = reward_batch + self.gamma * expected_next_q
+            bootstrap_mask = 1.0 - terminated_batch  # (B,)
+            q_target = reward_batch + bootstrap_mask * self.gamma * expected_next_q
             assert q_target.shape == (B,), f"q_target shape {tuple(q_target.shape)} expected {(B,)}"
         self.critic_optimizer.zero_grad(set_to_none=True)
         q_current = self.critic(state_batch, action_batch).squeeze()
@@ -336,11 +341,14 @@ class MPO(object):
             critic_loss = loss.detach()
             q_current = q_current.mean().detach()
             q_target = q_target.mean().detach()
-
+           
             stats = {
                 "critic_loss":  critic_loss,
                 "q_current_mean":    q_current,
-                "q_target_mean":     q_target
+                "q_target_mean":     q_target,
+                "terminated_rate": terminated_batch.mean().detach(),
+                "truncated_rate": truncated_batch.mean().detach(),
+
             }
         else:
             stats= None

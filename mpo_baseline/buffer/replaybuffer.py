@@ -1,91 +1,135 @@
 import numpy as np
+from typing import Any, List, Sequence, Tuple
 
 
 class ReplayBuffer:
     """
     Episodic replay buffer with random access by flattened transition index.
 
-    Stores episodes as:
-      self.episodes: list of tuples (states, actions, next_states, rewards)
-                     where each element is a numpy array.
+    Stores episodes as tuples of numpy arrays:
+      (states, actions, next_states, rewards, terminated, truncated)
+
+    Notes:
+    - Stores ALL transitions of an episode (no "L-1" trimming).
+    - Evicts whole episodes from the front to keep total transitions <= max_transitions.
+    - Uses episode start offsets + searchsorted (no huge idx_to_episode_idx list).
     """
 
     def __init__(self, max_replay_buffer: int = 2_000_000):
-        self.start_idx_of_episode = []
-        self.idx_to_episode_idx = []
-        self.episodes = []
-        self.tmp_episode_buff = []
+        self.max_transitions = int(max_replay_buffer)
 
-        self.max_transitions = max_replay_buffer
+        self.episodes: List[Tuple[np.ndarray, ...]] = []
+        self.episode_starts: List[int] = []  # start index (flattened) for each episode
+        self.total_size: int = 0
 
-    # ---------- Internal helpers ----------
+        self.tmp_episode_buff: List[Tuple[Any, ...]] = []
 
-    def _current_size(self) -> int:
-        return len(self.idx_to_episode_idx)
+    # -------------------- Internal helpers --------------------
 
-    def _rebuild_indices(self):
-        self.start_idx_of_episode = []
-        self.idx_to_episode_idx = []
+    def _rebuild_starts(self) -> None:
+        """Recompute episode_starts and total_size from scratch (used after eviction/load)."""
+        self.episode_starts = []
+        start = 0
+        for ep in self.episodes:
+            self.episode_starts.append(start)
+            start += int(ep[0].shape[0])  # states length = episode length
+        self.total_size = start
 
-        for ep_idx, (states, actions, next_states, rewards) in enumerate(self.episodes):
-            episode_len = len(states)
-            usable_episode_len = max(episode_len - 1, 0)
-
-            self.start_idx_of_episode.append(len(self.idx_to_episode_idx))
-            if usable_episode_len > 0:
-                self.idx_to_episode_idx.extend([ep_idx] * usable_episode_len)
-
-    def _ensure_capacity(self):
+    def _ensure_capacity(self) -> None:
+        """Evict oldest episodes until total_size <= max_transitions."""
         removed = False
-        while self._current_size() > self.max_transitions and self.episodes:
-            self.episodes.pop(0)
+        while self.total_size > self.max_transitions and self.episodes:
+            # remove oldest episode
+            old = self.episodes.pop(0)
+            self.total_size -= int(old[0].shape[0])
             removed = True
 
         if removed:
-            self._rebuild_indices()
+            self._rebuild_starts()
 
-    # ---------- Storage ----------
+    @staticmethod
+    def _as_2d(x: np.ndarray) -> np.ndarray:
+        if x.ndim == 1:
+            return x[None, :]
+        return x
 
-    def store_step(self, state, action, next_state, reward):
-        self.tmp_episode_buff.append((state, action, next_state, reward))
+    @staticmethod
+    def _as_col(x: np.ndarray) -> np.ndarray:
+        # (L,) -> (L,1), scalar -> (1,1), (L,k) -> reshape to (L,1) if needed
+        if x.ndim == 0:
+            return x.reshape(1, 1)
+        if x.ndim == 1:
+            return x.reshape(-1, 1)
+        if x.ndim == 2 and x.shape[1] != 1:
+            return x.reshape(-1, 1)
+        return x
+
+    # -------------------- Storage --------------------
+
+    def store_step(self, state, action, next_state, reward, terminated=False, truncated=False):
+        """Optional step-wise API."""
+        self.tmp_episode_buff.append((state, action, next_state, reward, terminated, truncated))
 
     def done_episode(self):
         if not self.tmp_episode_buff:
             return
-
         self.store_episodes([self.tmp_episode_buff])
         self.tmp_episode_buff = []
 
-    def store_episodes(self, new_episodes):
+    def store_episodes(self, new_episodes: Sequence[Sequence[Tuple[Any, ...]]]) -> None:
         """
         new_episodes: list of episodes
-          Each episode: list of (state, action, next_state, reward)
+          Each episode: list of tuples:
+            (state, action, next_state, reward, terminated, truncated)
         """
         for episode in new_episodes:
             if len(episode) == 0:
                 continue
 
-            states, actions, next_states, rewards = zip(*episode)
+            # Unpack (expects 6-tuple per step)
+            states, actions, next_states, rewards, terminated, truncated = zip(*episode)
 
-            # Convert to numpy arrays for faster batch access later
-            states = np.asarray(states)
-            actions = np.asarray(actions)
-            next_states = np.asarray(next_states)
-            rewards = np.asarray(rewards)
+            # Convert to numpy (float32 everywhere for speed/consistency)
+            states_np = np.asarray(states, dtype=np.float32)
+            actions_np = np.asarray(actions, dtype=np.float32)
+            next_states_np = np.asarray(next_states, dtype=np.float32)
+            rewards_np = np.asarray(rewards, dtype=np.float32)
+            terminated_np = np.asarray(terminated, dtype=np.float32)
+            truncated_np = np.asarray(truncated, dtype=np.float32)
 
-            episode_len = len(states)
-            usable_episode_len = max(episode_len - 1, 0)
+            # Ensure shapes
+            states_np = self._as_2d(states_np)
+            actions_np = self._as_2d(actions_np)
+            next_states_np = self._as_2d(next_states_np)
 
-            self.episodes.append((states, actions, next_states, rewards))
+            rewards_np = self._as_col(rewards_np)
+            terminated_np = self._as_col(terminated_np)
+            truncated_np = self._as_col(truncated_np)
 
-            # Update indices incrementally
-            self.start_idx_of_episode.append(len(self.idx_to_episode_idx))
-            if usable_episode_len > 0:
-                self.idx_to_episode_idx.extend([len(self.episodes) - 1] * usable_episode_len)
+            L = int(states_np.shape[0])
+            if L == 0:
+                continue
+
+            # Append episode
+            self.episode_starts.append(self.total_size)
+            self.episodes.append((states_np, actions_np, next_states_np, rewards_np, terminated_np, truncated_np))
+            self.total_size += L
 
         self._ensure_capacity()
 
-    # ---------- Sampling ----------
+    # -------------------- Sampling --------------------
+
+    def __len__(self) -> int:
+        return self.total_size
+
+    def _episode_index_for(self, idx: np.ndarray) -> np.ndarray:
+        """
+        Map flattened indices -> episode indices using searchsorted.
+        """
+        starts = np.asarray(self.episode_starts, dtype=np.int64)
+        # ep = rightmost start <= idx
+        ep_idx = np.searchsorted(starts, idx, side="right") - 1
+        return ep_idx
 
     def sample_batch(self, batch_size: int, replace: bool = False):
         buffer_size = len(self)
@@ -95,99 +139,109 @@ class ReplayBuffer:
         if (not replace) and batch_size > buffer_size:
             replace = True
 
-        indices = np.random.choice(buffer_size, size=batch_size, replace=replace)
-        return self.batch_get(indices)
+        idx = np.random.choice(buffer_size, size=batch_size, replace=replace)
+        return self.batch_get(idx)
 
     def sample_batch_stacked(self, batch_size: int, replace: bool = False):
-        s, a, ns, r = self.sample_batch(batch_size, replace)
-        return np.concatenate(s, axis=0), np.concatenate(a, axis=0), \
-               np.concatenate(ns, axis=0), np.concatenate(r, axis=0)
+        s, a, ns, r, term, trunc = self.sample_batch(batch_size, replace)
+        return (
+            np.concatenate(s, axis=0),
+            np.concatenate(a, axis=0),
+            np.concatenate(ns, axis=0),
+            np.concatenate(r, axis=0),
+            np.concatenate(term, axis=0),
+            np.concatenate(trunc, axis=0),
+        )
 
     def batch_get(self, indices):
         """
         Efficiently fetch multiple transitions by flattened indices.
 
         Returns lists of numpy arrays (chunked by episode group),
-        so caller can np.concatenate/stack cheaply.
+        so caller can concatenate cheaply.
         """
         idx = np.asarray(indices, dtype=np.int64)
+        if idx.size == 0:
+            return [], [], [], [], [], []
 
-        idx_to_ep = np.asarray(self.idx_to_episode_idx, dtype=np.int64)
-        start_idx = np.asarray(self.start_idx_of_episode, dtype=np.int64)
+        if idx.min() < 0 or idx.max() >= self.total_size:
+            raise IndexError("ReplayBuffer index out of range")
 
-        ep_idx = idx_to_ep[idx]
-        ep_start = start_idx[ep_idx]
-        local_i = idx - ep_start
+        ep_idx = self._episode_index_for(idx)
+        starts = np.asarray(self.episode_starts, dtype=np.int64)
+        local_i = idx - starts[ep_idx]
 
         # group by episode
         order = np.argsort(ep_idx)
         ep_idx = ep_idx[order]
         local_i = local_i[order]
 
-        state_chunks = []
-        action_chunks = []
-        next_state_chunks = []
-        reward_chunks = []
+        state_chunks, action_chunks, next_state_chunks = [], [], []
+        reward_chunks, term_chunks, trunc_chunks = [], [], []
 
-        unique_eps, starts = np.unique(ep_idx, return_index=True)
+        unique_eps, starts_pos = np.unique(ep_idx, return_index=True)
 
-        for u, s in enumerate(starts):
-            e = unique_eps[u]
-            end = starts[u + 1] if u + 1 < len(starts) else len(ep_idx)
+        for u, s_pos in enumerate(starts_pos):
+            e = int(unique_eps[u])
+            end = int(starts_pos[u + 1]) if (u + 1) < len(starts_pos) else len(ep_idx)
 
-            i_list = local_i[s:end]
+            i_list = local_i[s_pos:end]
 
-            states, actions, next_states, rewards = self.episodes[e]
+            states, actions, next_states, rewards, terminated, truncated = self.episodes[e]
 
-            # Fancy indexing -> much faster than Python loop
             state_chunks.append(states[i_list])
             action_chunks.append(actions[i_list])
             next_state_chunks.append(next_states[i_list])
             reward_chunks.append(rewards[i_list])
+            term_chunks.append(terminated[i_list])
+            trunc_chunks.append(truncated[i_list])
 
-        return state_chunks, action_chunks, next_state_chunks, reward_chunks
+        return state_chunks, action_chunks, next_state_chunks, reward_chunks, term_chunks, trunc_chunks
 
-    # ---------- Basic API ----------
-
-    def __len__(self):
-        return len(self.idx_to_episode_idx)
+    # -------------------- Random access --------------------
 
     def __getitem__(self, idx: int):
-        episode_idx = self.idx_to_episode_idx[idx]
-        start_idx = self.start_idx_of_episode[episode_idx]
-        i = idx - start_idx
+        if idx < 0 or idx >= self.total_size:
+            raise IndexError("ReplayBuffer index out of range")
 
-        states, actions, next_states, rewards = self.episodes[episode_idx]
-        return states[i], actions[i], next_states[i], rewards[i]
+        idx_arr = np.asarray([idx], dtype=np.int64)
+        ep = int(self._episode_index_for(idx_arr)[0])
+        start = self.episode_starts[ep]
+        i = idx - start
 
-    # ---------- Stats ----------
+        states, actions, next_states, rewards, terminated, truncated = self.episodes[ep]
+        return states[i], actions[i], next_states[i], rewards[i], terminated[i], truncated[i]
+
+    # -------------------- Stats --------------------
 
     def mean_reward(self) -> float:
         if not self.episodes:
             return 0.0
-        rewards = [ep[3] for ep in self.episodes]
-        return float(np.mean([np.mean(r) for r in rewards]))
+        return float(np.mean([float(ep[3].mean()) for ep in self.episodes]))
 
     def mean_return(self) -> float:
         if not self.episodes:
             return 0.0
-        rewards = [ep[3] for ep in self.episodes]
-        return float(np.mean([np.sum(r) for r in rewards]))
+        return float(np.mean([float(ep[3].sum()) for ep in self.episodes]))
 
-    # ---------- Save/Load ----------
+    def mean_episode_length(self) -> float:
+        if not self.episodes:
+            return 0.0
+        return float(np.mean([int(ep[0].shape[0]) for ep in self.episodes]))
+
+    # -------------------- Save/Load --------------------
 
     def state_dict(self) -> dict:
         return {
             "episodes": self.episodes,
-            "start_idx_of_episode": self.start_idx_of_episode,
-            "idx_to_episode_idx": self.idx_to_episode_idx,
+            "episode_starts": self.episode_starts,
+            "total_size": self.total_size,
             "max_transitions": self.max_transitions,
         }
 
-    def load_state_dict(self, data: dict):
+    def load_state_dict(self, data: dict) -> None:
         self.episodes = data["episodes"]
-        self.start_idx_of_episode = data["start_idx_of_episode"]
-        self.idx_to_episode_idx = data["idx_to_episode_idx"]
-        self.max_transitions = data["max_transitions"]
-
-
+        self.max_transitions = int(data["max_transitions"])
+        # Rebuild is safer than trusting stored starts/size
+        self._rebuild_starts()
+        self._ensure_capacity()
