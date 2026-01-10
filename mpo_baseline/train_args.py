@@ -23,16 +23,19 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 50
+    log_period: int = 75
     "number of global updates per log to wandb"
-    num_threads: int = 4 
+    num_threads: int = 8
     """number of threads to use"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
-    log_videos_period: int = 20
+    log_videos_period: int = 100
     """iterations per logging exactly one episode video"""
+    buffer_on_cuda: bool = True
+    """store replay_buffer on cuda"""
+    
 
     # ===============================
     # MPO Algorithm Parameters
@@ -111,7 +114,7 @@ class Args:
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 1000000
+    max_training_steps: int = 2000000
     """Maximal number of env steps for training"""
 
     # ===============================

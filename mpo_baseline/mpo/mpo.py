@@ -156,13 +156,15 @@ class MPO(object):
         loss_penalty_temperature = None
         diff_out_of_bound = None
         
-        stats = {
-            "eta_dual": float(self.eta),
-            "norm_target_q_mean": norm_target_q.mean().detach().item(),
-            "norm_target_q_min":  norm_target_q.min().detach().item(),
-            "norm_target_q_max":  norm_target_q.max().detach().item(),
-            "loss_dual":          loss_dual.detach().item(),
-        }
+        stats = None
+        if collect_stats:
+            stats = {
+                "eta_dual": self.eta_dual.detach(),
+                "norm_target_q_mean": norm_target_q.detach().mean(),
+                "norm_target_q_min":  norm_target_q.detach().amin(),
+                "norm_target_q_max":  norm_target_q.detach().amax(),
+                "loss_dual":          loss_dual.detach(),
+            }
 
         if self.use_action_penalty:
             # Compute action penalty when out of bound:
@@ -175,7 +177,6 @@ class MPO(object):
                 self.eta_penalty, cost_out_of_bound, self.eps_penalty
                 )
 
-            penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(eta_penalty, cost_out_of_bound, self.eps_penalty)
             lam_eff = self.lam * has_oob
 
             norm_target_q = (1 - lam_eff) * norm_target_q + lam_eff * penalty_normalized_weights
@@ -197,17 +198,9 @@ class MPO(object):
                 self.eta_penalty.clamp_(min=1e-3)
                 self.eta_penalty.grad = None
 
-        stats = None
-        if collect_stats:
-            stats = {
-                "eta_dual": self.eta_dual.detach(),
-                "norm_target_q_mean": norm_target_q.detach().mean(),
-                "norm_target_q_min":  norm_target_q.detach().amin(),
-                "norm_target_q_max":  norm_target_q.detach().amax(),
-                "loss_dual":          loss_dual.detach(),
-            }
+    
 
-            if self.use_action_penalty:
+            if self.use_action_penalty and collect_stats:
                 stats.update({
                     "eta_penalty": self.eta_penalty.detach(),
                     "has_out_of_bound": has_oob.detach() if has_oob is not None else None,
@@ -216,13 +209,16 @@ class MPO(object):
                     "penalty_weights_mean": penalty_normalized_weights.detach().mean(),
                     "penalty_weights_min":  penalty_normalized_weights.detach().amin(),
                     "penalty_weights_max":  penalty_normalized_weights.detach().amax(),
+                    "norm_weights_mean":  norm_target_q.detach().mean(),
+                    "norm_weights_min":  norm_target_q.detach().amin(),
+                    "norm_weights_max":  norm_target_q.detach().amax(),
                     "loss_penalty":         loss_penalty_temperature.detach() if loss_penalty_temperature is not None else None,
                 })
 
         return sampled_actions, norm_target_q, b_mu, b_std, stats
     
 
-    def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_std): 
+    def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_std, collect_stats): 
         """
         M-step of MPO:
         - Update the policy parameters to maximize the weighted log-likelihood
@@ -257,59 +253,66 @@ class MPO(object):
             self.eta_sigma.clamp_(1e-10, self.alpha_sigma_max)
 
         # Total actor loss: maximize weighted log-prob subject to KL constraints
-        self.actor_optimizer.zero_grad()
+        self.actor_optimizer.zero_grad(set_to_none=True)
         self.loss_l = -( self.loss_p + (self.eta_mu * (self.eps_mu_dim - C_mu_dim)).sum() + (self.eta_sigma * (self.eps_gamma_dim - C_sigma_dim)).sum())
         self.loss_l.backward()
         clip_grad_norm_(self.actor.parameters(), 0.1)
         self.actor_optimizer.step() 
 
-        # LOGGING STATS 
-        C_mu_mean    = C_mu_dim.mean().detach()
-        C_sigma_mean = C_sigma_dim.mean().detach()
+        if collect_stats:
 
-        eta_mu_mean    = self.eta_mu.mean().detach()
-        eta_mu_min     = self.eta_mu.min().detach()
-        eta_mu_max     = self.eta_mu.max().detach()
-        eta_sigma_mean = self.eta_sigma.mean().detach()
-        eta_sigma_min  = self.eta_sigma.min().detach()
-        eta_sigma_max  = self.eta_sigma.max().detach()
-        std_mean       = std.mean().detach()
-        mu_mean        = mu.mean().detach()
-        std_dim_mean = std.mean(dim=(0, 1))   # -> [A]
-        mu_dim_mean  = mu.mean(dim=(0, 1))    # -> [A]  
-        std_min = std_dim_mean.min().detach()
-        std_max = std_dim_mean.max().detach()
+            # LOGGING STATS 
+            C_mu_mean    = C_mu_dim.mean().detach()
+            C_sigma_mean = C_sigma_dim.mean().detach()
 
-        mu_min = mu_dim_mean.min().detach()
-        mu_max = mu_dim_mean.max().detach()
+            eta_mu_mean    = self.eta_mu.mean().detach()
+            eta_mu_min     = self.eta_mu.min().detach()
+            eta_mu_max     = self.eta_mu.max().detach()
+            eta_sigma_mean = self.eta_sigma.mean().detach()
+            eta_sigma_min  = self.eta_sigma.min().detach()
+            eta_sigma_max  = self.eta_sigma.max().detach()
+            std_mean       = std.mean().detach()
+            mu_mean        = mu.mean().detach()
+            std_dim_mean = std.mean(dim=(0, 1))   # -> [A]
+            mu_dim_mean  = mu.mean(dim=(0, 1))    # -> [A]  
+            std_min = std_dim_mean.min().detach()
+            std_max = std_dim_mean.max().detach()
 
-        stats = {
-            "loss_p":        self.loss_p.detach(),
-            "loss_l":        self.loss_l.detach(),
-            "C_mu_mean":     C_mu_mean,
-            "C_sigma_mean":  C_sigma_mean,
-            "eta_mu_mean":   eta_mu_mean,
-            "eta_mu_min":    eta_mu_min,
-            "eta_mu_max":    eta_mu_max,
-            "eta_sigma_mean":eta_sigma_mean,
-            "eta_sigma_min": eta_sigma_min,
-            "eta_sigma_max": eta_sigma_max,
-            "std_mean":      std_mean,
-            "mu_mean":       mu_mean,
-            "mu_max":        mu_max,
-            "mu_min":        mu_min,
-            "std_max":       std_max,
-            "std_min":       std_min,
-        }
+            mu_min = mu_dim_mean.min().detach()
+            mu_max = mu_dim_mean.max().detach()
+
+
+            stats = {
+                "loss_p":        self.loss_p.detach(),
+                "loss_l":        self.loss_l.detach(),
+                "C_mu_mean":     C_mu_mean,
+                "C_sigma_mean":  C_sigma_mean,
+                "eta_mu_mean":   eta_mu_mean,
+                "eta_mu_min":    eta_mu_min,
+                "eta_mu_max":    eta_mu_max,
+                "eta_sigma_mean":eta_sigma_mean,
+                "eta_sigma_min": eta_sigma_min,
+                "eta_sigma_max": eta_sigma_max,
+                "std_mean":      std_mean,
+                "mu_mean":       mu_mean,
+                "mu_max":        mu_max,
+                "mu_min":        mu_min,
+                "std_max":       std_max,
+                "std_min":       std_min,
+            }
+        else:
+            stats = None
 
         return stats
 
-    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num=20):
+    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, sample_num, collect_stats):
         B = state_batch.size(0)
-    
+        reward_batch = reward_batch.view(-1)
+        assert reward_batch.shape == (B,), f"reward_batch shape {tuple(reward_batch.shape)} expected {(B,)}"
+
         with torch.no_grad():
             
-            sampled_actions, sampled_next_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch, next_state_batch , sample_num = 20)
+            sampled_actions, sampled_next_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch, next_state_batch, sample_num)
             expanded_next_states = next_state_batch[None,:, :].expand(sample_num,-1, -1)  # (sample_num, B, state_dim)
             
             
@@ -320,22 +323,27 @@ class MPO(object):
             ).reshape(sample_num, B).mean(dim=0)  # (B,)
             
             q_target = reward_batch + self.gamma * expected_next_q
-        self.critic_optimizer.zero_grad()
+            assert q_target.shape == (B,), f"q_target shape {tuple(q_target.shape)} expected {(B,)}"
+        self.critic_optimizer.zero_grad(set_to_none=True)
         q_current = self.critic(state_batch, action_batch).squeeze()
+        assert q_current.shape == (B,), f"q_current shape {tuple(q_current.shape)} expected {(B,)}"
         loss = self.norm_loss_q(q_target, q_current)
         loss.backward()
         self.critic_optimizer.step()
 
-        # Stats
-        critic_loss = loss.detach()
-        q_current = q_current.mean().detach()
-        q_target = q_target.mean().detach()
+        if collect_stats:
+            # Stats
+            critic_loss = loss.detach()
+            q_current = q_current.mean().detach()
+            q_target = q_target.mean().detach()
 
-        stats = {
-            "critic_loss":  critic_loss,
-            "q_current_mean":    q_current,
-            "q_target_mean":     q_target
-        }
+            stats = {
+                "critic_loss":  critic_loss,
+                "q_current_mean":    q_current,
+                "q_target_mean":     q_target
+            }
+        else:
+            stats= None
 
         return stats, sampled_actions, b_mu, b_std
 
@@ -348,7 +356,7 @@ class MPO(object):
 
                 # get distribution
                 all_sampled_actions, b_mu, b_std = self.target_actor.sample_action(all_states, sample_num) # (2B,)
-                all_sampled_actions  = all_sampled_actions.permute( 1, 0, 2)    #(sample_num, 2B, action_dim)
+                all_sampled_actions  = all_sampled_actions.permute( 1, 0, 2).contiguous()    #(sample_num, 2B, action_dim)
                 sampled_actions      = all_sampled_actions[:, :B]  #(sample_num, B, action_dim)
                 sampled_next_actions = all_sampled_actions[:, B:]  #(sample_num, B, action_dim)
                 return sampled_actions, sampled_next_actions, b_mu[:B], b_std[:B]

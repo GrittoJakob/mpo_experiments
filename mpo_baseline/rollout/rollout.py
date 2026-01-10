@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 
-def collect_rollout(env, args, actor, replaybuffer, device):
+def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
         """
         Collect a number of episodes by interacting with the environment
         using the current policy and store them in the replay buffer.
@@ -18,7 +18,11 @@ def collect_rollout(env, args, actor, replaybuffer, device):
         with torch.no_grad():
             # Loop over episodes to collect
             while total_steps_collected < args.sample_steps_per_iter:
-                buff = []
+                
+                if buffer_gpu: 
+                    states_list, acts_list, next_states_list, rew_list = [], [], [], []
+                else:
+                    buff = []
                 state, info = env.reset()
 
                 # Roll out one episode up to a maximum number of steps
@@ -35,18 +39,32 @@ def collect_rollout(env, args, actor, replaybuffer, device):
                     next_state, reward, terminated, truncated, info = env.step(action)
                     total_steps_collected += 1
                     
-                    # Store transition in the current episode buffer
-                    buff.append((state, action, next_state, reward))
+                    if buffer_gpu: 
+                        states_list.append(state)
+                        acts_list.append(action)           # numpy
+                        next_states_list.append(next_state)
+                        rew_list.append(reward)
+                    else:
+                        buff.append((state, action, next_state, reward))
 
                     if terminated or truncated:
                         break
                     state = next_state
 
-                # Store completed episode
-                episodes.append(buff)
+                if buffer_gpu:    
+                    states_np      = np.asarray(states_list,      dtype=np.float32)
+                    actions_np     = np.asarray(acts_list,        dtype=np.float32)
+                    next_states_np = np.asarray(next_states_list, dtype=np.float32)
+                    rewards_np     = np.asarray(rew_list,        dtype=np.float32)
+
+                    # Store completed episode
+                    replaybuffer.store_episode_stacked(states_np, actions_np, next_states_np, rewards_np)
+                else:
+                    episodes.append(buff)
 
         actor.train()
 
         # Push all collected episodes into the replay buffer and returns the number of collected steps
-        replaybuffer.store_episodes(episodes)
+        if buffer_gpu is False:
+            replaybuffer.store_episodes(episodes)
         return total_steps_collected

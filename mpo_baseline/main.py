@@ -14,6 +14,7 @@ from nets.critic import Critic
 from typing import Optional
 from helpers.env_creator import limit_threads, make_train_env, make_eval_env
 from buffer.replaybuffer import ReplayBuffer
+from buffer.replaybuffer_gpu import ReplayBufferGPU
 from train_args import Args
 from train_mpo.train_loop import train_loop
 from helpers.warm_up_compilation import warmup_mpo_compile
@@ -86,7 +87,12 @@ def train():
     actor_optimizer, critic_optimizer = make_optimizer(args, actor, critic)
 
     # Create ReplayBuffer
-    replaybuffer = ReplayBuffer(args.max_replay_buffer)
+    if args.buffer_on_cuda and (args.device == "cuda" and torch.cuda.is_available()):
+        replaybuffer = ReplayBufferGPU(args.max_replay_buffer, device = "cuda")
+        gpu_buffer = True
+    else:
+        replaybuffer = ReplayBuffer(args.max_replay_buffer)
+        gpu_buffer = False
 
     # action space
     action_space = train_env.unwrapped.action_space
@@ -105,7 +111,7 @@ def train():
             compile_mode=getattr(args, "compile_mode", "reduce-overhead"),
         )  
 
-    train_loop(args, train_env, eval_env, device, replaybuffer, mpo)
+    train_loop(args, train_env, eval_env, device, replaybuffer, mpo, gpu_buffer)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from buffer.replaybuffer import ReplayBuffer
 from rollout.rollout import collect_rollout
 from rollout.video_rollout import log_one_episode_video
 from train_mpo.evaluation import evaluate
+from helpers.sample_minibatch import sample_minibatch, assert_batch_shapes
 
 
 
@@ -26,7 +27,8 @@ def train_loop(
         eval_env,
         device: torch.device,
         replaybuffer: ReplayBuffer,
-        mpo: MPO
+        mpo: MPO,
+        gpu_buffer: bool = False
         ):
     """
     Main training loop for MPO.
@@ -66,19 +68,16 @@ def train_loop(
     runtime_M_step = 0.0
     runtime_policy_eval = 0.0
     runtime_eval = 0.0
+    runtime_sample_minibatch = 0.0
 
     print(f"[DEBUG] start with number of steps = {len(replaybuffer)}, maximal number of environment steps: {max_training_steps}")       
 
-    # Buffer size for warm up
-    buffer_size = replaybuffer._current_size()
     
     # Warm-up: fill replay buffer with some initial experience
-    while buffer_size < args.warm_up_steps:
-        new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device)
+    while len(replaybuffer) < args.warm_up_steps:
+        new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device, gpu_buffer)
         num_steps += new_steps
 
-        # Update buffer size after adding new episodes
-        buffer_size= replaybuffer._current_size()
     
     # Main training iterations
     pbar = tqdm(total=max_training_steps, desc="Env steps")
@@ -88,7 +87,7 @@ def train_loop(
 
         # Collect fresh experience for this iteration
         t_env_start = time.perf_counter()
-        new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device)
+        new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device, gpu_buffer)
 
         #Update current steps for while loop
         num_steps += new_steps
@@ -112,32 +111,36 @@ def train_loop(
         for i_update in range(num_updates_per_iter):
             grad_updates += 1
             
-            buffer_size= replaybuffer._current_size()
+            buffer_size= len(replaybuffer)
             # Sample a minibatch from buffer    
             indices = np.random.choice(
                 buffer_size,
                 size=args.batch_size,
                 replace=False  # oder True, wenn du sehr viele Updates machen willst
-            )        
-            
-            # Unpack transitions sampled from replay buffer    
-            s_chunks, a_chunks, ns_chunks, r_chunks = replaybuffer.sample_batch(args.batch_size)
-
-            state_batch      = torch.as_tensor(np.concatenate(s_chunks, axis=0), dtype=torch.float32, device=device)
-            action_batch     = torch.as_tensor(np.concatenate(a_chunks, axis=0), dtype=torch.float32, device=device)
-            next_state_batch = torch.as_tensor(np.concatenate(ns_chunks, axis=0), dtype=torch.float32, device=device)
-            reward_batch     = torch.as_tensor(np.concatenate(r_chunks, axis=0), dtype=torch.float32, device=device)
+            )   
+            sample_mbatch_start = time.time()
+            state_batch, action_batch, next_state_batch, reward_batch = sample_minibatch(
+                replaybuffer=replaybuffer,
+                batch_size=args.batch_size,
+                device=device,
+                gpu_buffer=gpu_buffer,
+            )
+            assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch,
+                    args.batch_size, mpo.state_dim, mpo.action_dim)
+            sample_mbatch_end = time.time()
+            runtime_sample_minibatch += sample_mbatch_end - sample_mbatch_start
 
             # Policy evaluation (critic update)
             t_policy_eval_start = time.perf_counter()
 
-           
+            collect_stats = args.wandb_track and (i_update % args.log_period == 0)
             critic_update_stats, sampled_actions, b_mu, b_std= mpo.critic_update_td( 
                 state_batch =state_batch, 
                 action_batch =action_batch, 
                 next_state_batch =next_state_batch, 
                 reward_batch= reward_batch, 
-                sample_num =args.sample_action_num
+                sample_num =args.sample_action_num,
+                collect_stats= collect_stats
                 )
 
             t_policy_eval_end = time.perf_counter()    
@@ -148,7 +151,6 @@ def train_loop(
                 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()
-                collect_stats = args.wandb_track and (i_update % args.log_period == 0)
                 sampled_actions, norm_target_q, b_mu, b_A, stats_e_step = mpo.expectation_step(
                     state_batch =state_batch, 
                     sampled_actions=sampled_actions, 
@@ -167,7 +169,8 @@ def train_loop(
                     norm_target_q = norm_target_q, 
                     sampled_actions = sampled_actions, 
                     b_mu = b_mu, 
-                    b_std = b_std)
+                    b_std = b_std,
+                    collect_stats= collect_stats)
                 t_M_step_end = time.perf_counter()
                 runtime_M_step += t_M_step_end - t_M_step_start
 
@@ -186,12 +189,13 @@ def train_loop(
                 writer.add_scalar("time/M-Step", runtime_M_step, grad_updates)
                 writer.add_scalar("time/critic_update", runtime_policy_eval, grad_updates)
                 writer.add_scalar("time/evaluation", runtime_eval, grad_updates)
+                writer.add_scalar("time/sample_from_buffer", runtime_sample_minibatch, grad_updates)
                 
                 writer.add_scalar("charts/learning_rate_actor", mpo.actor_optimizer.param_groups[0]["lr"], grad_updates)
                 writer.add_scalar("charts/learning_rate_critic", mpo.critic_optimizer.param_groups[0]["lr"], grad_updates)
 
                 #  Buffer
-                writer.add_scalar("buffer/size", replaybuffer._current_size() ,grad_updates)
+                writer.add_scalar("buffer/size", len(replaybuffer) ,grad_updates)
                 writer.add_scalar("buffer/mean_return", mean_return_buffer , grad_updates)
                 writer.add_scalar("buffer/mean_reward_per_step", mean_reward_buffer ,grad_updates)
                 writer.add_scalar("buffer/mean_episode_len", mean_episode_len, grad_updates)
