@@ -20,13 +20,13 @@ def make_train_env(args, env_id, seed):
             env_id, 
             ctrl_cost_weight = args.ctrl_cost_weight,
             healthy_reward = args.healthy_reward_weight, 
-            contact_cost_weights = args.contact_cost_weight,
+            contact_cost_weight = args.contact_cost_weight,
             forward_reward_weight = args.forward_reward_weight
             )
 
     else: 
         env = gym.make(env_id)
-        
+
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -41,7 +41,8 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
             render_mode="rgb_array",
             ctrl_cost_weight = args.ctrl_cost_weight,
             healthy_reward = args.healthy_reward_weight, 
-            contact_cost_weights = args.contact_cost_weight
+            contact_cost_weight = args.contact_cost_weight,
+            forward_reward_weight = args.forward_reward_weight
             )
 
         # in dieser (frisch erzeugten) video-env: genau Episode 0 aufnehmen
@@ -56,7 +57,8 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
             env_id, 
             ctrl_cost_weight = args.ctrl_cost_weight,
             healthy_reward = args.healthy_reward_weight, 
-            contact_cost_weights = args.contact_cost_weight
+            contact_cost_weight = args.contact_cost_weight,
+            forward_reward_weight = args.forward_reward_weight
             )
 
     env.action_space.seed(seed_offset)
@@ -67,4 +69,4 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
     return env
 
 def make_video_env(args, run_name, name_prefix: str):
-        return make_eval_env(args.env_id,args.seed, True, run_name, name_prefix)
+        return make_eval_env(args, args.env_id,args.seed, True, run_name, name_prefix)

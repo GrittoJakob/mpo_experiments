@@ -110,7 +110,7 @@ class Args:
     """number of env steps to sample per iteration"""
     sample_episode_maxstep: int = 1000
     """maximum number of steps per sampled episode"""
-    batch_size: int = 512
+    batch_size: int = 1024
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
@@ -156,7 +156,7 @@ class Args:
     # ===============================
     ctrl_cost_weight: float = 0.5
     """ Weight for ctrl_cost term, default = 0.5"""
-    healthy_reward_weight: flaot = 1.0
+    healthy_reward_weight: float = 1.0
     """Weight for healthy_reward term, default = 1"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""

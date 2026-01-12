@@ -112,8 +112,36 @@ class MPO(object):
         self.eta_mu = torch.full((self.action_dim,), args.init_eta_mu, device=self.device,dtype=torch.float32)
         self.eta_sigma = torch.full((self.action_dim,), args.init_eta_sigma, device=self.device, dtype=torch.float32)
 
+    def target_critic_forward_pass(
+        self, 
+        state_batch,            # [B, dim_obs]
+        next_state_batch,       # [B, dim_obs] 
+        sampled_action,         # [sample_num, B]
+        sampled_next_actions,   # [sample_num, B]
+        ):
+
+        B = state_batch.size(0)
+        N = self.sample_action_num
+        assert next_state_batch.shape == state_batch.shape
+        assert all_sampled_actions.shape == (N, 2*B, self.action_dim)
+        
+        with torch.no_grad():
+            all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
+            all_states = all_states.unsqueeze(0).expand(N, -1, -1)                  # (N, 2B, obs)    #[N, 2B, dim_obs]
+
+            all_target_q = self.target_critic.forward(
+                expanded_all_states.reshape(-1, self.state_dim),    # (N* 2B, action_dim)
+                all_sampled_actions.reshape(-1, self.action_dim)    # (N * 2B, action_dim)
+            ).reshape(N, 2*B)  # (sample_num, 2B)
+
+            target_q = all_target_q[:,:B]
+            next_target_q = all_target_q[:,B:]
+
+        return target_ q, next_target_q
+
+
     
-    def expectation_step(self, state_batch, sampled_actions = None, b_mu = None, b_std= None, collect_stats: bool=False):
+    def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False):
         """
         E-step of MPO:
         - Sample actions from the target policy for each state.
@@ -122,25 +150,6 @@ class MPO(object):
         - Compute normalized weights over actions (norm_target_q).
         """
         diff_out_of_bound = None
-        B = state_batch.shape[0]  # the sample number of states
-        sample_num = self.sample_action_num  # the sample number of actions per state
-        
-        with torch.no_grad():
-
-            if sampled_actions is None:
-                
-                sampled_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch = state_batch, sample_num = sample_num)
-            else:
-
-                #Check for correct dimensions
-                self.assert_sampled_actions_shape(sampled_actions, state_batch)
-            
-            expanded_states = state_batch[None, ...].expand(sample_num, -1, -1)  # (sample_num, B, state_dim)
-            
-            # Evaluate Q-values of the target critic for all (state, action) pairs
-            target_q = self.target_critic.forward(
-                expanded_states.reshape(-1, self.state_dim), sampled_actions.reshape(-1, self.action_dim)  # (sample_num * B, action_dim)
-            ).reshape(sample_num, B)
         
         if self.eta_dual.grad is not None:
             self.eta_dual.grad = None
@@ -215,7 +224,7 @@ class MPO(object):
                     "loss_penalty":         loss_penalty_temperature.detach() if loss_penalty_temperature is not None else None,
                 })
 
-        return sampled_actions, norm_target_q, b_mu, b_std, stats
+        return norm_target_q, stats
     
 
     def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_std, collect_stats): 
@@ -237,7 +246,8 @@ class MPO(object):
         logp2 = pi_2.log_prob(sampled_actions)
 
         # Weighted policy improvement objective
-        self.loss_p = torch.mean(norm_target_q * (logp1 + logp2))
+        weighted_logp = (norm_target_q * (logp1 + logp2)) 
+        self.loss_p = - weighted_logp.sum(dim=0).mean()        # sum over N -> (B,), mean over B -> scalar
 
         # KL constraints between old and new Gaussian policies
         C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(b_mu, mu, b_std, std)
@@ -253,8 +263,14 @@ class MPO(object):
             self.eta_sigma.clamp_(1e-10, self.alpha_sigma_max)
 
         # Total actor loss: maximize weighted log-prob subject to KL constraints
+        constraint_mu = (C_mu_dim - self.eps_mu_dim)
+        constraint_sigma = (C_sigma_dim - self.eps_gamma_dim)
+
+        self.loss_l = self.loss_p \
+              + (self.eta_mu * constraint_mu).sum() \
+              + (self.eta_sigma * constraint_sigma).sum()
+
         self.actor_optimizer.zero_grad(set_to_none=True)
-        self.loss_l = -( self.loss_p + (self.eta_mu * (self.eps_mu_dim - C_mu_dim)).sum() + (self.eta_sigma * (self.eps_gamma_dim - C_sigma_dim)).sum())
         self.loss_l.backward()
         clip_grad_norm_(self.actor.parameters(), 0.1)
         self.actor_optimizer.step() 
@@ -305,26 +321,19 @@ class MPO(object):
 
         return stats
 
-    def critic_update_td(self, state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch, sample_num, collect_stats):
+    def critic_update_td(self, next_target_q,  state_batch, action_batch, reward_batch, terminated_batch, truncated_batch, collect_stats):
         B = state_batch.size(0)
         reward_batch = reward_batch.view(-1)
         terminated_batch = terminated_batch.view(-1)
         truncated_batch  = truncated_batch.view(-1)
+        assert next_target_q.shape = (self.sample_action_num, B)
         assert reward_batch.shape == (B,), f"reward_batch shape {tuple(reward_batch.shape)} expected {(B,)}"
         assert terminated_batch.shape == (B,), f"terminated_batch shape {tuple(terminated_batch.shape)} expected {(B,)}"
         assert truncated_batch.shape == (B,), f"truncated_batch shape {tuple(truncated_batch.shape)} expected {(B,)}"
 
         with torch.no_grad():
             
-            sampled_actions, sampled_next_actions, b_mu, b_std = self.sample_action_from_target_actor(state_batch, next_state_batch, sample_num)
-            expanded_next_states = next_state_batch[None,:, :].expand(sample_num,-1, -1)  # (sample_num, B, state_dim)
-            
-            
-            ## get expected Q value from target critic
-            expected_next_q = self.target_critic.forward(
-                expanded_next_states.reshape(-1, self.state_dim),  # (sample_num * B, state_dim)
-                sampled_next_actions.reshape(-1, self.action_dim)  # (sample_num * B, action_dim)
-            ).reshape(sample_num, B).mean(dim=0)  # (B,)
+            expected_next_q = next_target_q.mean(dim=0) #[B,]
             
             bootstrap_mask = 1.0 - terminated_batch  # (B,)
             q_target = reward_batch + bootstrap_mask * self.gamma * expected_next_q
@@ -353,7 +362,7 @@ class MPO(object):
         else:
             stats= None
 
-        return stats, sampled_actions, b_mu, b_std
+        return stats
 
     def sample_action_from_target_actor(self, state_batch, next_state_batch = None, sample_num = 20):
         B = state_batch.size(0)
@@ -367,7 +376,7 @@ class MPO(object):
                 all_sampled_actions  = all_sampled_actions.permute( 1, 0, 2).contiguous()    #(sample_num, 2B, action_dim)
                 sampled_actions      = all_sampled_actions[:, :B]  #(sample_num, B, action_dim)
                 sampled_next_actions = all_sampled_actions[:, B:]  #(sample_num, B, action_dim)
-                return sampled_actions, sampled_next_actions, b_mu[:B], b_std[:B]
+                return  all_sampled_actions, sampled_actions, b_mu[:B], b_std[:B]
             else:
                 sampled_actions, b_mu, b_std = self.target_actor.sample_action(state_batch, sample_num)
                 sampled_actions = sampled_actions.permute(1,0,2)

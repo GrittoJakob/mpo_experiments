@@ -112,12 +112,8 @@ def train_loop(
             grad_updates += 1
             
             buffer_size= len(replaybuffer)
-            # Sample a minibatch from buffer    
-            indices = np.random.choice(
-                buffer_size,
-                size=args.batch_size,
-                replace=False  # oder True, wenn du sehr viele Updates machen willst
-            )   
+
+            # Sample mini batch from buffer
             sample_mbatch_start = time.time()
             state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch = sample_minibatch(
                 replaybuffer=replaybuffer,
@@ -125,21 +121,45 @@ def train_loop(
                 device=device,
                 gpu_buffer=gpu_buffer,
             )
+            
+            #Check for correct shapes
             assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch,
                     args.batch_size, mpo.state_dim, mpo.action_dim)
             sample_mbatch_end = time.time()
             runtime_sample_minibatch += sample_mbatch_end - sample_mbatch_start
 
+            # Compute target_actor forward pass to get sampled_actions an b_mu, b_st
+            # all_sampled_actions: sampled actions for timestep t and t+1 concatenated
+            # sampled actions: sampled actions only for timestep t
+            sample_action_start= time.time()
+            all_sampled_actions, sampled_actions, b_mu, b_std = mpo.sample_actions_from_target_actor(
+                state_batch= state_batch,
+                next_state_batch= next_state_batch,
+                sample_num= args.sample_actions_num
+            )
+            sample_action_end = time.time()
+            runtime_sample_actions = sample_action_end - sample_action_start
+
+            # Compute forward pass of target critic for state_batch and next_state_batch
+            t_critic_forward_start = time.time()
+            target_q, next_target_q = mpo.target_critic_forward_pass(
+                state_batch=state_batch,
+                next_state_batch= nex_state_batch,
+                all_sampled_actins = all_sampled_actions
+            )
+            t_critic_forward_end = time.time()
+            runtime_t_critic_forward = t_critic_forward_end - t_critic_forward_start
+
             # Policy evaluation (critic update)
             t_policy_eval_start = time.perf_counter()
-
             collect_stats = args.wandb_track and (i_update % args.log_period == 0)
             critic_update_stats, sampled_actions, b_mu, b_std= mpo.critic_update_td( 
+                next_target_q = next_taget_q,
                 state_batch =state_batch, 
                 action_batch =action_batch, 
-                next_state_batch =next_state_batch, 
                 reward_batch= reward_batch, 
-                sample_num =args.sample_action_num,
+                terminated_batch = terminated_batch,
+                truncated_batch= truncated_batch,
                 collect_stats= collect_stats
                 )
 
@@ -151,11 +171,9 @@ def train_loop(
                 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()
-                sampled_actions, norm_target_q, b_mu, b_A, stats_e_step = mpo.expectation_step(
-                    state_batch =state_batch, 
+                norm_target_q, stats_e_step = mpo.expectation_step(
+                    target_q= target_q,
                     sampled_actions=sampled_actions, 
-                    b_mu = b_mu, 
-                    b_std = b_std,
                     collect_stats = collect_stats
                     )
                 
@@ -190,6 +208,8 @@ def train_loop(
                 writer.add_scalar("time/critic_update", runtime_policy_eval, grad_updates)
                 writer.add_scalar("time/evaluation", runtime_eval, grad_updates)
                 writer.add_scalar("time/sample_from_buffer", runtime_sample_minibatch, grad_updates)
+                writer.add_scalar("time/t_critic_foward_pass", runtime_t_critic_forward, grad_updates)
+                writer.add_scalar("time/sample_actions", runtime_sample_actions, grad_updates)
                 
                 writer.add_scalar("charts/learning_rate_actor", mpo.actor_optimizer.param_groups[0]["lr"], grad_updates)
                 writer.add_scalar("charts/learning_rate_critic", mpo.critic_optimizer.param_groups[0]["lr"], grad_updates)
@@ -248,6 +268,8 @@ def train_loop(
                 writer.add_scalar("critic_update/q_loss", critic_update_stats["critic_loss"], grad_updates)
                 writer.add_scalar("critic_update/q_current_mean", critic_update_stats["q_current_mean"], grad_updates)
                 writer.add_scalar("critic_update/q_target_mean", critic_update_stats["q_target_mean"], grad_updates)
+                writer.add_scalar("critic_update/terminated_rate", critic_update_stats["terminated_rate"], grad_updates)
+                writer.add_scalar("critic_update/truncated_rate", critic_update_stats["truncated_rate"], grad_updates)
 
             # Target network update & logging
             # Periodically sync target networks with current actor/critic
