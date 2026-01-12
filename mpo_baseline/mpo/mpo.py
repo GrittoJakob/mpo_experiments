@@ -116,28 +116,43 @@ class MPO(object):
         self, 
         state_batch,            # [B, dim_obs]
         next_state_batch,       # [B, dim_obs] 
-        sampled_action,         # [sample_num, B]
-        sampled_next_actions,   # [sample_num, B]
+        all_sampled_actions,         # [sample_num, 2*B]
         ):
 
-        B = state_batch.size(0)
-        N = self.sample_action_num
-        assert next_state_batch.shape == state_batch.shape
-        assert all_sampled_actions.shape == (N, 2*B, self.action_dim)
-        
-        with torch.no_grad():
-            all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
-            all_states = all_states.unsqueeze(0).expand(N, -1, -1)                  # (N, 2B, obs)    #[N, 2B, dim_obs]
+        # --- state shapes ---
+            assert state_batch.ndim == 2, f"state_batch must be (B, obs_dim), got {tuple(state_batch.shape)}"
+            assert next_state_batch.shape == state_batch.shape, \
+                f"next_state_batch {tuple(next_state_batch.shape)} != state_batch {tuple(state_batch.shape)}"
+            assert state_batch.shape[1] == self.state_dim, \
+                f"state_dim mismatch: state_batch.shape[1]={state_batch.shape[1]} != {self.state_dim}"
 
-            all_target_q = self.target_critic.forward(
-                expanded_all_states.reshape(-1, self.state_dim),    # (N* 2B, action_dim)
-                all_sampled_actions.reshape(-1, self.action_dim)    # (N * 2B, action_dim)
-            ).reshape(N, 2*B)  # (sample_num, 2B)
+            B = state_batch.size(0)
 
-            target_q = all_target_q[:,:B]
-            next_target_q = all_target_q[:,B:]
+            # --- action shapes ---
+            assert all_sampled_actions.ndim == 3, \
+                f"all_sampled_actions must be (N, 2B, act_dim), got {tuple(all_sampled_actions.shape)}"
 
-        return target_ q, next_target_q
+            N, twoB, A = all_sampled_actions.shape
+            assert N == self.sample_action_num, \
+                f"N mismatch: all_sampled_actions N={N} != self.sample_action_num={self.sample_action_num}"
+            assert twoB == 2 * B, \
+                f"2B mismatch: all_sampled_actions.shape[1]={twoB} != 2*B={2*B}"
+            assert A == self.action_dim, \
+                f"act_dim mismatch: all_sampled_actions.shape[2]={A} != self.action_dim={self.action_dim}"
+
+            with torch.no_grad():
+                all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
+                expanded_all_states = all_states.unsqueeze(0).expand(N, -1, -1)                  # (N, 2B, obs)  
+
+                all_target_q = self.target_critic.forward(
+                    expanded_all_states.reshape(-1, self.state_dim),    # (N* 2B, action_dim)
+                    all_sampled_actions.reshape(-1, self.action_dim)    # (N * 2B, action_dim)
+                ).reshape(N, 2*B)  # (sample_num, 2B)
+
+                target_q = all_target_q[:,:B]
+                next_target_q = all_target_q[:,B:]
+
+            return target_q, next_target_q
 
 
     
@@ -326,10 +341,17 @@ class MPO(object):
         reward_batch = reward_batch.view(-1)
         terminated_batch = terminated_batch.view(-1)
         truncated_batch  = truncated_batch.view(-1)
-        assert next_target_q.shape = (self.sample_action_num, B)
+
+        # check for correct dimensions
+        assert next_target_q.shape == (self.sample_action_num, B), \
+            f"next_target_q shape {tuple(next_target_q.shape)} expected {(self.sample_action_num, B)}"
         assert reward_batch.shape == (B,), f"reward_batch shape {tuple(reward_batch.shape)} expected {(B,)}"
         assert terminated_batch.shape == (B,), f"terminated_batch shape {tuple(terminated_batch.shape)} expected {(B,)}"
         assert truncated_batch.shape == (B,), f"truncated_batch shape {tuple(truncated_batch.shape)} expected {(B,)}"
+        assert state_batch.ndim == 2 and state_batch.shape[0] == B and state_batch.shape[1] == self.state_dim, \
+            f"state_batch shape {tuple(state_batch.shape)} expected {(B, self.state_dim)}"
+        assert action_batch.ndim == 2 and action_batch.shape[0] == B and action_batch.shape[1] == self.action_dim, \
+            f"action_batch shape {tuple(action_batch.shape)} expected {(B, self.action_dim)}"
 
         with torch.no_grad():
             
@@ -338,6 +360,7 @@ class MPO(object):
             bootstrap_mask = 1.0 - terminated_batch  # (B,)
             q_target = reward_batch + bootstrap_mask * self.gamma * expected_next_q
             assert q_target.shape == (B,), f"q_target shape {tuple(q_target.shape)} expected {(B,)}"
+
         self.critic_optimizer.zero_grad(set_to_none=True)
         q_current = self.critic(state_batch, action_batch).squeeze()
         assert q_current.shape == (B,), f"q_current shape {tuple(q_current.shape)} expected {(B,)}"
@@ -364,7 +387,7 @@ class MPO(object):
 
         return stats
 
-    def sample_action_from_target_actor(self, state_batch, next_state_batch = None, sample_num = 20):
+    def sample_actions_from_target_actor(self, state_batch, next_state_batch = None, sample_num = 20):
         B = state_batch.size(0)
         with torch.no_grad():
 

@@ -76,7 +76,7 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     UTD_ratio: float = 0.75
     """ Ratio: num_updates per env step"""
-    max_replay_buffer: int = 1000000
+    max_replay_buffer: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
@@ -114,7 +114,7 @@ class Args:
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 2000000
+    max_training_steps: int = 850000
     """Maximal number of env steps for training"""
 
     # ===============================
@@ -123,7 +123,7 @@ class Args:
 
     evaluate_period: int = 5
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 3
+    evaluate_episode_num: int = 5
     """how many evaluation episodes to run"""
     evaluate_episode_maxstep: int = 1000
     """max steps per evaluation episode"""
@@ -154,11 +154,11 @@ class Args:
     # ===============================
     # Reward shaping for ant env
     # ===============================
-    ctrl_cost_weight: float = 0.5
+    ctrl_cost_weight: float = 0.7
     """ Weight for ctrl_cost term, default = 0.5"""
-    healthy_reward_weight: float = 1.0
+    healthy_reward_weight: float = 1.2
     """Weight for healthy_reward term, default = 1"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""
-    forward_reward_weight: float = 1.0
+    forward_reward_weight: float = 0.8
     """Weight for forward_reward term, default = 1"""

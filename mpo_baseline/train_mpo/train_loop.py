@@ -69,6 +69,8 @@ def train_loop(
     runtime_policy_eval = 0.0
     runtime_eval = 0.0
     runtime_sample_minibatch = 0.0
+    runtime_sample_actions = 0.0
+    runtime_t_critic_forward = 0.0
 
     print(f"[DEBUG] start with number of steps = {len(replaybuffer)}, maximal number of environment steps: {max_training_steps}")       
 
@@ -135,26 +137,26 @@ def train_loop(
             all_sampled_actions, sampled_actions, b_mu, b_std = mpo.sample_actions_from_target_actor(
                 state_batch= state_batch,
                 next_state_batch= next_state_batch,
-                sample_num= args.sample_actions_num
+                sample_num= args.sample_action_num
             )
             sample_action_end = time.time()
-            runtime_sample_actions = sample_action_end - sample_action_start
+            runtime_sample_actions += sample_action_end - sample_action_start
 
             # Compute forward pass of target critic for state_batch and next_state_batch
             t_critic_forward_start = time.time()
             target_q, next_target_q = mpo.target_critic_forward_pass(
                 state_batch=state_batch,
-                next_state_batch= nex_state_batch,
-                all_sampled_actins = all_sampled_actions
+                next_state_batch= next_state_batch,
+                all_sampled_actions = all_sampled_actions
             )
             t_critic_forward_end = time.time()
-            runtime_t_critic_forward = t_critic_forward_end - t_critic_forward_start
+            runtime_t_critic_forward += t_critic_forward_end - t_critic_forward_start
 
             # Policy evaluation (critic update)
             t_policy_eval_start = time.perf_counter()
             collect_stats = args.wandb_track and (i_update % args.log_period == 0)
-            critic_update_stats, sampled_actions, b_mu, b_std= mpo.critic_update_td( 
-                next_target_q = next_taget_q,
+            critic_update_stats = mpo.critic_update_td( 
+                next_target_q = next_target_q,
                 state_batch =state_batch, 
                 action_batch =action_batch, 
                 reward_batch= reward_batch, 
