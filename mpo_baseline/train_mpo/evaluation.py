@@ -25,10 +25,13 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
         for ep_idx in range(args.evaluate_episode_num):
             for target in target_curriculum:
                 if args.task_mode == "inverted":
-                    options['task_mode'] = target # set task mode for eval env forward/backward
+                    options={"task_mode": target} # set task mode for eval env forward/backward
+                else:    
+                    options = None
                 total_reward = 0.0
                 ep_steps= 0.0
                 # Reset environment at the beginning of each episode
+                
                 state, info = eval_env.reset(options = options)
                 for s in range(args.evaluate_episode_maxstep):
 

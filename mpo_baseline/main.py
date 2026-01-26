@@ -19,7 +19,7 @@ from train_args import Args
 from train_mpo.train_loop import train_loop
 from helpers.warm_up_compilation import warmup_mpo_compile
 
-from mpo.mpo import MPO
+from mpo.__init__ import MPO
 
 def init_runname(args):
      # Run-Name à la CleanRL

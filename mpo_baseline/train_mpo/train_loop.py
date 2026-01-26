@@ -12,7 +12,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 from nets.actor import Actor
 from nets.critic import Critic
-from mpo.mpo import MPO
+from mpo.__init__ import MPO
 from buffer.replaybuffer import ReplayBuffer
 from rollout.rollout import collect_rollout
 from rollout.video_rollout import log_one_episode_video

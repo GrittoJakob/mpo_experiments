@@ -57,6 +57,8 @@ class MPO(object):
         # Device used for tensors / networks (CPU or GPU)
         self.device = device
 
+        self.use_mass_force_KL = args.use_mass_force_KL
+
         # Number of action samples
         self.sample_action_num = args.sample_action_num
 
@@ -103,7 +105,7 @@ class MPO(object):
         self.eta_sigma = torch.full((self.action_dim,), args.init_eta_sigma, device=self.device, dtype=torch.float32)
 
         self.expectation_step = types.MethodType(expectation_step, self)
-        self.maximization_step_sequence = types.MethodType(maximization_step, self)
+        self.maximization_step = types.MethodType(maximization_step, self)
         self.critic_update_td = types.MethodType(critic_update_td, self)
         self.sample_actions_from_target_actor = types.MethodType(sample_actions_from_target_actor, self)
         self.compute_weights_temperature_loss = types.MethodType(compute_weights_temperature_loss, self)

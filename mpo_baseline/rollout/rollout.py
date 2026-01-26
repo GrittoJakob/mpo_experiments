@@ -26,7 +26,6 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
 
 
             state, info = env.reset()
-            task_invert = info['task_direction']
 
             for _ in range(args.sample_episode_maxstep):
                 state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
@@ -39,12 +38,13 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 total_steps_collected += 1
                 
                 # velocity rewards
-                vel_rew = info['velocity_reward']
+                
                 if args.task_mode == "inverted":
-                  
+                    vel_rew = info['velocity_reward']
                     task_invert = info['task_direction']
                 else:
                     task_invert = 1.0
+                    vel_rew = 0.0
             
 
                 # Store transition parts
@@ -73,7 +73,7 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 rewards_np          = np.asarray(rews_list,        dtype=np.float32)
                 terminated_np       = np.asarray(terminated_list,  dtype=np.float32)
                 truncated_np        = np.asarray(truncated_list,   dtype=np.float32)
-                task_invert_np      = np.asarray(task_invert_list, dtpye=np.float32)
+                task_invert_np      = np.asarray(task_invert_list, dtype=np.float32)
                 vel_rew_np          = np.asarray(vel_rew_list, dtype=np.float32) 
                     
                 replaybuffer.store_episode_stacked(

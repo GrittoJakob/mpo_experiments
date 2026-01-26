@@ -23,9 +23,9 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 75
+    log_period: int = 200
     "number of global updates per log to wandb"
     num_threads: int = 8
     """number of threads to use"""
@@ -102,6 +102,7 @@ class Args:
     """whether to use action clipping in rollout to save clipped action or not"""
     use_tanh_on_mean:bool = True
     """use tanh on mean in actor after last layer"""
+    use_mass_force_KL: bool = True
 
     # ===============================
     # Sampling / Replay Buffer
@@ -114,7 +115,7 @@ class Args:
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 850000
+    max_training_steps: int = 4000000
     """Maximal number of env steps for training"""
 
     # ===============================
@@ -162,7 +163,7 @@ class Args:
     """Weight for healthy_reward term, default = 1"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""
-    forward_reward_weight: float = 0.8
+    forward_reward_weight: float = 1.0
     """Weight for forward_reward term, default = 1"""
 
 

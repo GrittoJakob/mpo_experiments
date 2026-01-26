@@ -11,8 +11,6 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     under the non-parametric target distribution (defined by norm_target_q).
     - Enforce KL constraints between the new and old policy via Lagrange multipliers.
     """
-    # Check for correct dimensions
-    self.assert_sampled_actions_shape(sampled_actions, state_batch)
 
     # Current actor parameters for this batch of states
     mu_on, std_on = self.actor.forward(state_batch)      
@@ -27,7 +25,7 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     self.loss_p = - weighted_logp.sum(dim=0).mean()        # sum over N -> (B,), mean over B -> scalar
 
     # KL constraints between old and new Gaussian policies
-    C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(mu_off, mu_on, std_off, std_on)
+    C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(mu_off, mu_on, std_off, std_on, self.use_mass_force_KL)
 
     with torch.no_grad():
 

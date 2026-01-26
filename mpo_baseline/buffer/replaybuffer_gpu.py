@@ -72,6 +72,7 @@ class ReplayBufferGPU:
         self._terminated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
         self._truncated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
         self._task_invert = torch.empty((N,1), device = self.device, dtype = self.dtype)
+        self._vel_rew = torch.empty((N,1), device= self.device, dtype = self.dtype)
 
     @staticmethod
     def _to_2d(x: torch.Tensor) -> torch.Tensor:
@@ -182,8 +183,8 @@ class ReplayBufferGPU:
         rewards_g = rewards.to(self.device, dtype=self.dtype, non_blocking=True)
         terminated_g = terminated.to(self.device, dtype=self.dtype, non_blocking=True)
         truncated_g = truncated.to(self.device, dtype=self.dtype, non_blocking=True)
-        task_invert_g = task_invert.to(self.device, dtype=self.dtpye, non_blocking= True)
-        vel_rew_g = vel_rew_g.to(self.device, dtpye=self.dtype, non_blocking=True)
+        task_invert_g = task_invert.to(self.device, dtype=self.dtype, non_blocking= True)
+        vel_rew_g = vel_rew.to(self.device, dtype=self.dtype, non_blocking=True)
 
         assert self._states is not None
         assert self._actions is not None
@@ -292,7 +293,7 @@ class ReplayBufferGPU:
         next_states_t = self._to_2d(to_cpu_tensor(next_states))
         rewards_t = self._to_col(to_cpu_tensor(rewards))
         task_invert_t= self._to_col(to_cpu_tensor(task_invert))
-        vel_rew_t = self._to_colU(to_cpu_tensor(vel_rew))
+        vel_rew_t = self._to_col(to_cpu_tensor(vel_rew))
 
         L = int(states_t.shape[0])
         if terminated is None:
