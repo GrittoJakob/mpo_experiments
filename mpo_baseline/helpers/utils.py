@@ -48,44 +48,47 @@ def gaussian_kl(mu_i, mu, Ai, A):
     return C_mu, C_sigma, torch.mean(sigma_i_det), torch.mean(sigma_det), var_mean, var_min, var_max
 
 
-def gaussian_kl_diag(mu_q, mu, A_q, A, eps=1e-8, use ):
+def gaussian_kl_diag(mu_off, mu_on, std_off, std_on, use_mass_force_KL, eps: float = 1e-8):
     """
-    mu_i, mu: (B, da)
-    Ai, A: Cholesky-Faktoren (B, da, da) - diagonal 
+    KL divergence for diagonal Gaussians with arbitrary leading dimensions (e.g. [B, T, da]).
+
+    We compute KL( N_i || N ), i.e. "old/behavior" (mu_i, Ai) relative to "new" (mu, A).
+
+    Args:
+        mu_i, mu: [..., da]               Means (old, new)
+        Ai, A:   [..., da] or [..., da, da]
+                 Either per-dimension stddev (last dim = da),
+                 or a (lower-triangular) Cholesky matrix where only the diagonal is used.
+
     Returns:
-        C_mu_dim_mean: (da,)  mean-KL pro Dim über Batch gemittelt
-        C_sigma_dim_mean: (da,) var-KL pro Dim über Batch gemittelt
-        C_mu_scalar, C_sigma_scalar optional
+        C_mu_dim_mean:    (da,) mean KL contribution from the means, averaged over all leading dims
+        C_sigma_dim_mean: (da,) mean KL contribution from the variances, averaged over all leading dims
     """
-    if A_q.dim() == 3:
-        std_q = torch.diagonal(A_q, dim1=-2, dim2=-1)
-    else:
-        std_q = A_q
 
-    if A.dim() == 3:
-        std = torch.diagonal(A, dim1=-2, dim2=-1)
-    else:
-        std = A
+    assert mu_off.shape == mu_on.shape == std_off.shape == std_on.shape
+    assert mu_on.dim() >= 1
+    # Already std (or diagonal) in the last dimension
 
-    var_q = std_q**2
-    var   = std**2
+    var_off = std_off ** 2  # old variance
+    var_on   = std_on ** 2    # new variance
 
-    if use_mass_KL:
-        C_mu_dim = 0.5 * ((mu_q - mu)**2) / (var_q + eps)
-        C_sigma_dim = 0.5 * ( (var_q / (var + eps)) - 1.0 + torch.log((var + eps) / (var_q + eps)) )
+
+    # Mean contribution for KL(N_i || N):
+    if use_mass_force_KL:
+        # 0.5 * (mu_i - mu)^2 / var
+        C_mu_dim = 0.5 * (mu_off - mu_on) ** 2 / (var_on + eps)  # [..., da]
+        C_sigma_dim = torch.log(std_on / (std_off + eps)) + 0.5 * ((var_off / var_on + eps) - 1)  
     
     else:
-        # Mean-KL pro Dim
-        C_mu_dim = 0.5 * ((mu - mu_q)**2) / (var + eps)  # (B, da)
+        C_mu_dim = 0.5 * (mu_on - mu_off) ** 2 / (var_off + eps)  # [..., da]
+        C_sigma_dim = torch.log(std_off / (std_on + eps)) + 0.5 * ((var_on / var_off + eps) - 1)  # [M, dim_act]
 
-        # Var-KL pro Dim
-        C_sigma_dim = 0.5 * ( (var / (var_q + eps)) - 1.0 + torch.log((var_q + eps) / (var + eps)) )
 
     # Batch-Mittel -> pro Dim
     C_mu_dim_mean = C_mu_dim.mean(dim=0)         # (da,)
     C_sigma_dim_mean = C_sigma_dim.mean(dim=0)  # (da,)
 
-    # Optional: wieder Skalar wie vorher
+    # Optional: again scalar
     C_mu_scalar = C_mu_dim_mean.sum()
     C_sigma_scalar = C_sigma_dim_mean.sum()
 

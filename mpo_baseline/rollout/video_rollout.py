@@ -3,28 +3,33 @@ import torch
 import os
 import glob
 import wandb
+import options
 
 def log_one_episode_video(args, actor, device, name_prefix, global_steps):
 
     venv = make_video_env(args, args.run_name, name_prefix)
+    target_curriculum = [1.0, -1.0]
     try:
-        # eine Episode deterministic laufen lassen
-        actor.eval()
-        state, _ = venv.reset()
-        done = False
-        steps = 0
-        total_reward = 0.0
-        with torch.no_grad():
-            while not done and steps < args.evaluate_episode_maxstep:
-                st = torch.as_tensor(state, dtype=torch.float32, device=device)
-                action = actor.action(st, deterministic=True)
-                state, reward, terminated, truncated, _ = venv.step(action)
-                done = terminated or truncated
-                total_reward += float(reward)
-                steps += 1
-        actor.train()
+        for target in target_curriculum:
+            if args.task_mode == "inverted":
+                options['task_mode'] = target # set task mode for eval env forward/backward
+            # eine Episode deterministic laufen lassen
+            actor.eval()
+            state, _ = venv.reset(options = options)
+            done = False
+            steps = 0
+            total_reward = 0.0
+            with torch.no_grad():
+                while not done and steps < args.video_max_steps:
+                    st = torch.as_tensor(state, dtype=torch.float32, device=device)
+                    action = actor.action(st, deterministic=True)
+                    state, reward, terminated, truncated, _ = venv.step(action)
+                    done = terminated or truncated
+                    total_reward += float(reward)
+                    steps += 1
+            actor.train()
 
-        
+            
     finally:
         venv.close()
 

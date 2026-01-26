@@ -38,6 +38,9 @@ class ReplayBufferGPU:
         self._rewards: Optional[torch.Tensor] = None          # (N, 1)
         self._terminated: Optional[torch.Tensor] = None       # (N, 1) float32 0/1
         self._truncated: Optional[torch.Tensor] = None        # (N, 1) float32 0/1
+        self._task_invert: Optional[torch.Tensor] = None
+        self._vel_rew: Optional[torch.Tensor] = None
+
 
         # Ring pointers: logical window is [start .. start+size) modulo N
         self._start: int = 0
@@ -47,7 +50,7 @@ class ReplayBufferGPU:
         self._episodes: Deque[Tuple[int, float, float]] = deque()
 
         # Optional step-wise API (kept for compatibility)
-        self.tmp_episode_buff: List[Tuple[Any, Any, Any, Any, Any, Any]] = []
+        self.tmp_episode_buff: List[Tuple[Any, Any, Any, Any, Any, Any, Any, Any]] = []
 
     # -------------------- Internal helpers --------------------
 
@@ -68,6 +71,7 @@ class ReplayBufferGPU:
         self._rewards = torch.empty((N, 1), device=self.device, dtype=self.dtype)
         self._terminated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
         self._truncated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
+        self._task_invert = torch.empty((N,1), device = self.device, dtype = self.dtype)
 
     @staticmethod
     def _to_2d(x: torch.Tensor) -> torch.Tensor:
@@ -138,6 +142,8 @@ class ReplayBufferGPU:
         rewards: torch.Tensor,
         terminated: torch.Tensor,
         truncated: torch.Tensor,
+        task_invert: torch.Tensor,
+        vel_rew: torch.Tensor,
     ) -> None:
         """
         Append one episode (L transitions) into the GPU ring buffer.
@@ -158,6 +164,8 @@ class ReplayBufferGPU:
             rewards = rewards[-keep:]
             terminated = terminated[-keep:]
             truncated = truncated[-keep:]
+            task_invert = task_invert[-keep:]
+            vel_rew = vel_rew[-keep:]
             L = keep
 
         # Allocate on first use
@@ -174,6 +182,8 @@ class ReplayBufferGPU:
         rewards_g = rewards.to(self.device, dtype=self.dtype, non_blocking=True)
         terminated_g = terminated.to(self.device, dtype=self.dtype, non_blocking=True)
         truncated_g = truncated.to(self.device, dtype=self.dtype, non_blocking=True)
+        task_invert_g = task_invert.to(self.device, dtype=self.dtpye, non_blocking= True)
+        vel_rew_g = vel_rew_g.to(self.device, dtpye=self.dtype, non_blocking=True)
 
         assert self._states is not None
         assert self._actions is not None
@@ -181,6 +191,8 @@ class ReplayBufferGPU:
         assert self._rewards is not None
         assert self._terminated is not None
         assert self._truncated is not None
+        assert self._task_invert is not None
+        assert self._vel_rew is not None
 
         self._write_block(self._states, states_g, write_pos)
         self._write_block(self._actions, actions_g, write_pos)
@@ -188,17 +200,22 @@ class ReplayBufferGPU:
         self._write_block(self._rewards, rewards_g, write_pos)
         self._write_block(self._terminated, terminated_g, write_pos)
         self._write_block(self._truncated, truncated_g, write_pos)
+        self._write_block(self._task_invert, task_invert_g, write_pos)
+        self._write_block(self._vel_rew, vel_rew_g, write_pos)
+
 
         ep_return = float(rewards.sum().detach().cpu())
         ep_mean_reward = float(rewards.mean().detach().cpu())
-        self._episodes.append((L, ep_return, ep_mean_reward))
+        ep_vel_return = float(vel_rew.sum().detach().cpu())
+        ep_vel_reward = float(vel_rew.mean().detach().cpu())
+        self._episodes.append((L, ep_return, ep_mean_reward, ep_vel_return, ep_vel_reward))
         self._size += L
 
     # -------------------- Storage API --------------------
 
-    def store_step(self, state, action, next_state, reward, terminated=False, truncated=False):
+    def store_step(self, state, action, next_state, reward, terminated=False, truncated=False, task_invert= 1.0, vel_rew=0.0):
         """Optional step-wise API (kept for compatibility)."""
-        self.tmp_episode_buff.append((state, action, next_state, reward, terminated, truncated))
+        self.tmp_episode_buff.append((state, action, next_state, reward, terminated, truncated, task_invert, vel_rew))
 
     def done_episode(self):
         if not self.tmp_episode_buff:
@@ -223,7 +240,7 @@ class ReplayBufferGPU:
                 terminated = [0.0] * len(rewards)
                 truncated = [0.0] * len(rewards)
             else:
-                states, actions, next_states, rewards, terminated, truncated = zip(*episode)
+                states, actions, next_states, rewards, terminated, truncated, task_invert, vel_rew = zip(*episode)
 
             # Convert to CPU tensors first
             states_t = self._to_2d(torch.as_tensor(states, dtype=self.dtype, device="cpu"))
@@ -234,7 +251,9 @@ class ReplayBufferGPU:
             terminated_t = self._to_col(torch.as_tensor(terminated, dtype=self.dtype, device="cpu"))
             truncated_t = self._to_col(torch.as_tensor(truncated, dtype=self.dtype, device="cpu"))
 
-            self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t)
+            task_invert_t = self._to_col(torch.as_tensor(task_invert, dtype= self.dtype, device="cpu"))
+            vel_rew_t = self._to_col(torch.as_tensor(vel_rew, dtype= self.dtype, device="cpu"))
+            self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t, task_invert_t, vel_rew_t)
 
     def store_episode_stacked(
         self,
@@ -244,6 +263,8 @@ class ReplayBufferGPU:
         rewards,
         terminated=None,
         truncated=None,
+        task_invert=1.0,
+        vel_rew=0.0,
     ) -> None:
         """
         Store one episode as stacked arrays/tensors.
@@ -270,6 +291,8 @@ class ReplayBufferGPU:
         actions_t = self._to_2d(to_cpu_tensor(actions))
         next_states_t = self._to_2d(to_cpu_tensor(next_states))
         rewards_t = self._to_col(to_cpu_tensor(rewards))
+        task_invert_t= self._to_col(to_cpu_tensor(task_invert))
+        vel_rew_t = self._to_colU(to_cpu_tensor(vel_rew))
 
         L = int(states_t.shape[0])
         if terminated is None:
@@ -282,7 +305,7 @@ class ReplayBufferGPU:
         else:
             truncated_t = self._to_col(to_cpu_tensor(truncated))
 
-        self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t)
+        self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t, task_invert_t, vel_rew_t)
 
     # -------------------- Sampling API --------------------
 
@@ -327,15 +350,20 @@ class ReplayBufferGPU:
         assert self._rewards is not None
         assert self._terminated is not None
         assert self._truncated is not None
+        assert self._task_invert is not None
+        assert self._vel_rew is not None
 
-        s = self._states[storage_idx]
-        a = self._actions[storage_idx]
-        ns = self._next_states[storage_idx]
-        r = self._rewards[storage_idx]
+        state = self._states[storage_idx]
+        action = self._actions[storage_idx]
+        next_state = self._next_states[storage_idx]
+        rew = self._rewards[storage_idx]
         term = self._terminated[storage_idx]
         trunc = self._truncated[storage_idx]
+        # task_invert = self._task_invert[storage_idx]
+        # vel_rew = self._vel_rew[storage_idx]
 
-        return [s], [a], [ns], [r], [term], [trunc]
+
+        return [state], [action], [next_state], [rew], [term], [trunc]
 
     def sample_batch(self, batch_size: int, replace: bool = False):
         idx = self._sample_indices(batch_size, replace)
@@ -391,6 +419,7 @@ class ReplayBufferGPU:
         if not self._episodes:
             return 0.0
         return float(sum(L for L, _, _ in self._episodes) / len(self._episodes))
+    def mean_vel_rew(self) -> float:
 
     # -------------------- Save/Load --------------------
 

@@ -23,7 +23,7 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "adl-robotics-project"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 75
     "number of global updates per log to wandb"
@@ -142,6 +142,8 @@ class Args:
     """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
     save_replay_buffer: bool = True
     """whether to include replay buffer in checkpoints (large files!)"""
+    video_max_steps: int = 400
+    """number of steps to go in video rollout"""
 
     # ===============================
     # warm up compilation
@@ -162,3 +164,16 @@ class Args:
     """Weight for contact_cost term, default = 5e-4"""
     forward_reward_weight: float = 0.8
     """Weight for forward_reward term, default = 1"""
+
+
+    # ===============================
+    # Multi-Task settings
+    # ===============================
+
+    ## in train_args.py 
+    task_mode: str = "inverted" 
+    """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
+    velocity_reward_scale: float = 1.5
+    """scale parameter for reward flipped velocity"""
+    scale_wrong_direction_reward: float = 1.5
+    """scale parameter for scale if velocity is wrong direction"""

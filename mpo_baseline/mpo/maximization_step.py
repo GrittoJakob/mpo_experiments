@@ -4,7 +4,7 @@ from torch.distributions import MultivariateNormal, Independent, Normal
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from helpers.utils import gaussian_kl, gaussian_kl_diag
 
-def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b_std, collect_stats): 
+def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off, std_off, collect_stats): 
     """
     M-step of MPO:
     - Update the policy parameters to maximize the weighted log-likelihood
@@ -15,10 +15,10 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b
     self.assert_sampled_actions_shape(sampled_actions, state_batch)
 
     # Current actor parameters for this batch of states
-    mu, std = self.actor.forward(state_batch)      
+    mu_on, std_on = self.actor.forward(state_batch)      
 
-    pi_1 = Independent(Normal(mu, b_std), 1)
-    pi_2 = Independent(Normal(b_mu, std), 1)
+    pi_1 = Independent(Normal(mu_on, std_off), 1)
+    pi_2 = Independent(Normal(mu_off, std_on), 1)
     logp1 = pi_1.log_prob(sampled_actions)
     logp2 = pi_2.log_prob(sampled_actions)
 
@@ -27,7 +27,7 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b
     self.loss_p = - weighted_logp.sum(dim=0).mean()        # sum over N -> (B,), mean over B -> scalar
 
     # KL constraints between old and new Gaussian policies
-    C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(b_mu, mu, b_std, std)
+    C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(mu_off, mu_on, std_off, std_on)
 
     with torch.no_grad():
 
@@ -64,10 +64,10 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, b_mu, b
         eta_sigma_mean = self.eta_sigma.mean().detach()
         eta_sigma_min  = self.eta_sigma.min().detach()
         eta_sigma_max  = self.eta_sigma.max().detach()
-        std_mean       = std.mean().detach()
-        mu_mean        = mu.mean().detach()
-        std_dim_mean = std.mean(dim=(0, 1))   # -> [A]
-        mu_dim_mean  = mu.mean(dim=(0, 1))    # -> [A]  
+        std_mean       = std_on.mean().detach()
+        mu_mean        = mu_on.mean().detach()
+        std_dim_mean = std_on.mean(dim=(0, 1))   # -> [A]
+        mu_dim_mean  = mu_on.mean(dim=(0, 1))    # -> [A]  
         std_min = std_dim_mean.min().detach()
         std_max = std_dim_mean.max().detach()
 

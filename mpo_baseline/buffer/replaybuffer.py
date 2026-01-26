@@ -87,7 +87,7 @@ class ReplayBuffer:
                 continue
 
             # Unpack (expects 6-tuple per step)
-            states, actions, next_states, rewards, terminated, truncated = zip(*episode)
+            states, actions, next_states, rewards, terminated, truncated, task_invert,  = zip(*episode)
 
             # Convert to numpy (float32 everywhere for speed/consistency)
             states_np = np.asarray(states, dtype=np.float32)

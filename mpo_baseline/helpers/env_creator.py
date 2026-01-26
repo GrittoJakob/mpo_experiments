@@ -1,6 +1,8 @@
 import torch
 import os
 import gymnasium as gym
+from .task_wrapper import InvertedVelocityWrapper
+
 
 def limit_threads(n: int):
     # PyTorch threads
@@ -12,6 +14,12 @@ def limit_threads(n: int):
     os.environ["OPENBLAS_NUM_THREADS"] = str(n)
     os.environ["MKL_NUM_THREADS"] = str(n)
     os.environ["NUMEXPR_NUM_THREADS"] = str(n)
+
+def maybe_wrap_task(env, args):
+    if getattr(args, "task_mode", "default") == "inverted":
+        env = InvertedVelocityWrapper(env, args)
+    return env
+
 
 
 def make_train_env(args, env_id, seed):
@@ -26,6 +34,8 @@ def make_train_env(args, env_id, seed):
 
     else: 
         env = gym.make(env_id)
+
+    env = maybe_wrap_task(env, args)
 
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
@@ -61,6 +71,7 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
             forward_reward_weight = args.forward_reward_weight
             )
 
+    env = maybe_wrap_task(env, args)
     env.action_space.seed(seed_offset)
     env.observation_space.seed(seed_offset)
 

@@ -109,6 +109,7 @@ def train_loop(
         args.UTD_ratio * new_steps
         )
 
+
         # Perform several updates per iteration (UTD ratio)
         for i_update in range(num_updates_per_iter):
             grad_updates += 1
@@ -134,7 +135,7 @@ def train_loop(
             # all_sampled_actions: sampled actions for timestep t and t+1 concatenated
             # sampled actions: sampled actions only for timestep t
             sample_action_start= time.time()
-            all_sampled_actions, sampled_actions, b_mu, b_std = mpo.sample_actions_from_target_actor(
+            all_sampled_actions, sampled_actions, mu_off, std_off = mpo.sample_actions_from_target_actor(
                 state_batch= state_batch,
                 next_state_batch= next_state_batch,
                 sample_num= args.sample_action_num
@@ -188,8 +189,8 @@ def train_loop(
                     state_batch=state_batch,
                     norm_target_q = norm_target_q, 
                     sampled_actions = sampled_actions, 
-                    b_mu = b_mu, 
-                    b_std = b_std,
+                    mu_off = mu_off, 
+                    std_off = std_off,
                     collect_stats= collect_stats)
                 t_M_step_end = time.perf_counter()
                 runtime_M_step += t_M_step_end - t_M_step_start
