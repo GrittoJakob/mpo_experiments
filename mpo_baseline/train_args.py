@@ -160,7 +160,7 @@ class Args:
     ctrl_cost_weight: float = 0.7
     """ Weight for ctrl_cost term, default = 0.5"""
     healthy_reward_weight: float = 1.2
-    """Weight for healthy_reward term, default = 1"""
+    """Weight for healthy_reward term, default = 1.2"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""
     forward_reward_weight: float = 1.0
@@ -172,7 +172,7 @@ class Args:
     # ===============================
 
     ## in train_args.py 
-    task_mode: str = "inverted" 
+    task_mode: str = "default" 
     """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
     velocity_reward_scale: float = 1.5
     """scale parameter for reward flipped velocity"""

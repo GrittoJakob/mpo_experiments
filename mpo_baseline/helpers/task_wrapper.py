@@ -52,7 +52,7 @@ class InvertedVelocityWrapper(gym.Wrapper):
         # 🟢 Inject Hint
         obs = self._add_hint(obs)        
 
-        reward_forward = info.get("reward_forward", 0.0)
+        reward_forward = info.get("reward_forward")
         others = rewards - reward_forward
 
         # --- 1. CALCULATE TASK REWARD ---

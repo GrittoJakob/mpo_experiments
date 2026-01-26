@@ -12,7 +12,9 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
     try:
         for target in target_curriculum:
             if args.task_mode == "inverted":
-                options['task_mode'] = target # set task mode for eval env forward/backward
+                options={"task_mode": target} # set task mode for eval env forward/backward
+            else:    
+                options = None # set task mode for eval env forward/backward
             # eine Episode deterministic laufen lassen
             actor.eval()
             state, _ = venv.reset(options = options)
