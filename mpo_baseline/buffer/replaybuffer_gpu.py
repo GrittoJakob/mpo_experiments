@@ -47,7 +47,7 @@ class ReplayBufferGPU:
         self._size: int = 0
 
         # Episode FIFO metadata: (length, return_sum, mean_reward)
-        self._episodes: Deque[Tuple[int, float, float]] = deque()
+        self._episodes: Deque[Tuple[int, float, float, float, float, bool]] = deque()
 
         # Optional step-wise API (kept for compatibility)
         self.tmp_episode_buff: List[Tuple[Any, Any, Any, Any, Any, Any, Any, Any]] = []
@@ -203,12 +203,12 @@ class ReplayBufferGPU:
         self._write_block(self._task_invert, task_invert_g, write_pos)
         self._write_block(self._vel_rew, vel_rew_g, write_pos)
 
-
+        task_invert_b = bool(task_invert[0].detach().cpu())
         ep_return = float(rewards.sum().detach().cpu())
         ep_mean_reward = float(rewards.mean().detach().cpu())
         ep_vel_return = float(vel_rew.sum().detach().cpu())
         ep_vel_reward = float(vel_rew.mean().detach().cpu())
-        self._episodes.append((L, ep_return, ep_mean_reward, ep_vel_return, ep_vel_reward))
+        self._episodes.append((L, ep_return, ep_mean_reward, ep_vel_return, ep_vel_reward, task_invert_b))
         self._size += L
 
     # -------------------- Storage API --------------------
@@ -408,18 +408,38 @@ class ReplayBufferGPU:
     def mean_reward(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(mr for _, _, mr in self._episodes) / len(self._episodes))
+        return float(sum(mean_rew for _, _, mean_rew, _, _,_ in self._episodes) / len(self._episodes))
 
     def mean_return(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(ret for _, ret, _ in self._episodes) / len(self._episodes))
+        return float(sum(ret for _, ret, _, _, _,_ in self._episodes) / len(self._episodes))
 
     def mean_episode_length(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(L for L, _, _ in self._episodes) / len(self._episodes))
+        return float(sum(L for L, _, _, _ in self._episodes) / len(self._episodes))
     def mean_vel_rew(self) -> float:
+        if not self._episodes:
+            return 0.0
+        return float(sum(vel_rew for _, _, _,_,vel_rew, _ in self._episodes) / len(self._episodes))
+    def mean_vel_ret(self) -> float:
+        if not self._episodes:
+            return 0.0
+        return float(sum(vel_ret for _,_,_,vel_ret, _,_ in self._episodes) / len(self._episodes))
+    
+    def mean_vel_pos_neg_ret(self):
+        if not self._episodes:
+            return 0.0
+        mean_vel_pos_ret = 0.0
+        mean_vel_neg_ret = 0.0
+    
+        for _,_,_,mean_vel_ret,_,task_invert in self._episodes:
+            if task_invert > 0:
+                mean_vel_pos_ret += mean_vel_ret
+            else:
+                mean_vel_neg_ret += mean_vel_ret
+        return float(mean_vel_pos_ret / len(self._episodes)), float(mean_vel_neg_ret / len(self._episodes))
 
     # -------------------- Save/Load --------------------
 

@@ -223,6 +223,12 @@ def train_loop(
                 writer.add_scalar("buffer/mean_reward_per_step", mean_reward_buffer ,grad_updates)
                 writer.add_scalar("buffer/mean_episode_len", mean_episode_len, grad_updates)
                 writer.add_scalar("buffer/total_num_steps",num_steps, grad_updates)
+                if args.task_mode == "inverted":
+                    writer.add_scalar("buffer/mean_vel_return", replaybuffer.mean_vel_ret(), grad_updates)
+                    writer.add_scalar("buffer/mean_vel_reward", replaybuffer.mean_vel_rew(), grad_updates)
+                    mean_pos_ret, mean_neg_return = replaybuffer.mean_vel_pos_neg_ret()
+                    writer.add_scalar("buffer/mean_vel_pos_return", mean_pos_ret, grad_updates)
+                    writer.add_scalar("buffer/mean_vel_neg_return", mean_neg_return, grad_updates)
                 
                 # M-Step Loggingd
                 writer.add_scalar("m-step/loss_p", stats_m["loss_p"], grad_updates)
