@@ -21,11 +21,11 @@ class Args:
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "MPO_Ant"
     """the wandb's project name"""
-    wandb_entity: Optional[str] = "adl-robotics-project"
+    wandb_entity: Optional[str] = "fsandco"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 200
+    log_period: int = 250
     "number of global updates per log to wandb"
     num_threads: int = 8
     """number of threads to use"""
@@ -60,21 +60,21 @@ class Args:
     "Learning rate for dual function"
     dual_constraint: float = 0.1
     """hard constraint of the dual formulation in the E-step"""
-    kl_mean_constraint: float = 5e-4   
+    kl_mean_constraint: float = 1e-4   
     """hard constraint of the mean in the M-step"""
-    kl_var_constraint: float = 1.25e-6        
+    kl_var_constraint: float = 1e-6        
     """hard constraint of the covariance in the M-step"""
     alpha_mean_scale: float = 1.0
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
-    alpha_var_scale: float = 0.1
+    alpha_var_scale: float = 0.5
     """learning rate / scale factor for updating eta_sigma (variance KL Lagrange multiplier)"""
-    alpha_mean_max: float = 0.4
+    alpha_mean_max: float = 2.0
     """maximum clamp value for eta_mu (mean KL Lagrange multiplier)"""
-    alpha_var_max: float = 3.0
+    alpha_var_max: float = 100.00
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
     q_loss_type: str = 'mse'
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
-    UTD_ratio: float = 0.75
+    UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
     max_replay_buffer: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
@@ -84,9 +84,9 @@ class Args:
     """number of warm-up steps for the buffer"""
     delay_policy_update: int = 1
     """number of critic updates per policy update"""
-    init_eta_mu: float = 0.05
+    init_eta_mu: float = 0.5
     """int value of eta mu"""
-    init_eta_sigma: float = 1.0
+    init_eta_sigma: float = 6
     """ init value of eta sigma"""
     init_eta_dual: float = 1.5
     """ init value of temperature variable"""
@@ -124,7 +124,7 @@ class Args:
 
     evaluate_period: int = 5
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 5
+    evaluate_episode_num: int = 1
     """how many evaluation episodes to run"""
     evaluate_episode_maxstep: int = 1000
     """max steps per evaluation episode"""
@@ -172,9 +172,12 @@ class Args:
     # ===============================
 
     ## in train_args.py 
-    task_mode: str = "default" 
+    task_mode: str = "target_goal" 
     """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
-    velocity_reward_scale: float = 1.5
+    velocity_reward_scale: float = 1.4
     """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.5
+    scale_wrong_direction_reward: float = 1.4
     """scale parameter for scale if velocity is wrong direction"""
+    position_reward_scale: float = 0.4
+    goal_radius: float = 5
+    success_radius: float = 0.5

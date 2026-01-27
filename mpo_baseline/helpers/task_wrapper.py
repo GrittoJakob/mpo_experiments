@@ -51,8 +51,9 @@ class InvertedVelocityWrapper(gym.Wrapper):
         
         # 🟢 Inject Hint
         obs = self._add_hint(obs)        
+        assert ("reward_forward" in info) or ("forward_reward" in info), info.keys()
 
-        reward_forward = info.get("reward_forward")
+        reward_forward = info.get("reward_forward", info.get("forward_reward", 0.0))
         others = rewards - reward_forward
 
         # --- 1. CALCULATE TASK REWARD ---
@@ -74,3 +75,144 @@ class InvertedVelocityWrapper(gym.Wrapper):
     def _add_hint(self, obs):
         """Appends the target direction (+1 or -1) to the observation vector."""
         return np.append(obs, self.invert)
+
+
+class GoalPositionWrapper(gym.Wrapper):
+    """
+    Multitask: Ant soll zu einer (x,y)-Zielposition laufen.
+    - Ersetzt reward_forward durch Velocity-in-Goal-Richtung
+    - Optionaler zusätzlicher Positions-/Progress-Reward
+    - Fügt Hint zur Observation hinzu: (dir_x, dir_y, dist)
+    """
+    def __init__(self, env, args):
+        super().__init__(env)
+
+        # Reward scales
+        self.vel_scale = args.velocity_reward_scale
+        self.pos_scale = args.position_reward_scale
+        self.scale_wrong_direction = args.scale_wrong_direction_reward
+
+        # Task sampling
+        self.goal_list = self.make_goal_list(args)  # i.e. [(5,0),(-5,0),(0,5),(0,-5)]
+        self.goal_radius = args.goal_radius
+        self.success_radius = args.success_radius
+
+        # Internal state
+        self.goal = np.zeros(2, dtype=np.float64)
+        self.prev_xy_pos = None
+
+        # Obs: append 3 dims (dir_x, dir_y, dist)
+        low = np.append(env.observation_space.low, [-np.inf, -np.inf, 0.0])
+        high = np.append(env.observation_space.high, [ np.inf,  np.inf, np.inf])
+        self.observation_space = gym.spaces.Box(low, high, dtype=np.float64)
+
+    def _sample_goal(self):
+        if self.goal_list is not None and len(self.goal_list) > 0:
+            gx, gy = self.goal_list[np.random.randint(len(self.goal_list))]
+            return np.array([gx, gy], dtype=np.float64)
+        # If list is None: Continuous: uniform in a disk
+        r = self.goal_radius * np.sqrt(np.random.random())
+        theta = 2 * np.pi * np.random.random()
+        return np.array([r * np.cos(theta), r * np.sin(theta)], dtype=np.float64)
+
+    def _get_xy_from_info(self, info):
+        return np.array([info["x_position"], info["y_position"]], dtype=np.float64)
+
+    def _dt(self):      
+        dt = getattr(self.env.unwrapped, "dt", None)
+        if dt is None:
+
+            dt = 0.05
+        return float(dt)
+
+    def _hint(self, xy):
+        vec = self.goal - xy
+        dist = np.linalg.norm(vec)
+        if dist > 1e-8:
+            dir_vec = vec / dist
+        else:
+            dir_vec = np.zeros(2, dtype=np.float64)
+        return np.array([dir_vec[0], dir_vec[1], dist], dtype=np.float64)
+
+    def reset(self, seed=None, options=None):
+        options_env = dict(options) if options else None
+        if options_env and "target_goal" in options_env:
+            options_env.pop("target_goal")
+        obs, info = self.env.reset(seed=seed, options=options_env)
+
+
+        xy = self._get_xy_from_info(info)
+        self.prev_xy = xy.copy()
+
+        obs = np.append(obs, self._hint(xy))
+
+        info["goal_x"] = float(self.goal[0])
+        info["goal_y"] = float(self.goal[1])
+        info["distance_to_goal"] = float(np.linalg.norm(self.goal - xy))
+        return obs, info
+
+    def step(self, action):
+        # Save prev pos
+        prev_xy_pos = self.prev_xy.copy()
+
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        xy_pos = self._get_xy_from_info(info)
+        self.prev_xy_pos = xy_pos.copy()
+
+        # Inject hint
+        obs = np.append(obs, self._hint(xy_pos))
+
+        # split base reward and replace it by new reward for position and velocitiy
+        reward_forward = info.get("reward_forward", 0.0)
+        base_reward = reward - reward_forward  
+
+        # Velecotiy reward
+        dt = self._dt()
+        vel_xy = (xy_pos - prev_xy_pos) / max(dt, 1e-8)
+
+        dist_to_goal = self.goal - prev_xy_pos
+        dist_prev = np.linalg.norm(dist_to_goal)
+        if dist_prev > 1e-8:
+            u = dist_to_goal / dist_prev
+        else:
+            u = np.zeros(2, dtype=np.float64)
+
+        v_towards = float(np.dot(vel_xy, u))
+
+        vel_rew = self.vel_scale * v_towards
+        if vel_rew < 0:
+            vel_rew *= self.scale_wrong_direction
+
+        # --- Position term (optional): progress shaping ---
+        dist_now = float(np.linalg.norm(self.goal - xy_pos))
+        progress = float(dist_prev - dist_now)  # >0 wenn näher gekommen
+
+        pos_rew = self.pos_scale * progress
+
+        # --- Success bonus / termination (optional) ---
+        reached = dist_now < self.success_radius
+        # Wenn du willst:
+        if reached:
+            pos_rew += 10.0
+            terminated = terminated or reached
+
+        total_reward = base_reward + vel_rew + pos_rew
+
+        # Telemetry
+        info["goal_x"] = float(self.goal[0])
+        info["goal_y"] = float(self.goal[1])
+        info["distance_to_goal"] = dist_now
+        info["goal_progress"] = progress
+        info["goal_velocity"] = v_towards
+        info["velocity_reward"] = vel_rew
+        info["position_reward"] = pos_rew
+        info["reached_goal"] = reached
+
+        return obs, total_reward, terminated, truncated, info
+
+    def make_goal_list(self, args):
+        R = args.goal_radius
+        goal_list = [(R,0), (-R,0), (0,R), (0,-R),
+                (R,R), (R,-R), (-R,R), (-R,-R)]
+        return goal_list

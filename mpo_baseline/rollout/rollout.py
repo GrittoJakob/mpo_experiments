@@ -22,7 +22,7 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
             # Per-episode storage (always lists -> no branching in the step loop)
             states_list, acts_list, next_states_list = [], [], []
             rews_list, terminated_list, truncated_list = [], [], []
-            task_invert_list, vel_rew_list = [], []
+            task_invert_list, vel_rew_list, pos_rew_list, progress_list = [], [], [],[]
 
 
             state, info = env.reset()
@@ -38,14 +38,18 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 total_steps_collected += 1
                 
                 # velocity rewards
-                
+                task_invert = 0.0
+                vel_rew = 0.0
+                pos_rew = 0.0
+                progress = 0.0
                 if args.task_mode == "inverted":
                     vel_rew = info['velocity_reward']
                     task_invert = info['task_direction']
-                else:
-                    task_invert = 1.0
-                    vel_rew = 0.0
-            
+                elif args.task_mode == "target_goal":
+                    progress = info["goal_progress"]
+                    vel_rew = info['velocity_reward']
+                    pos_rew = info["position_reward"] 
+               
 
                 # Store transition parts
                 states_list.append(state)
@@ -56,6 +60,8 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 truncated_list.append(truncated)
                 task_invert_list.append(task_invert)
                 vel_rew_list.append(vel_rew)
+                pos_rew_list.append(pos_rew)
+                progress_list.append(progress)
 
               
 
@@ -74,17 +80,19 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 terminated_np       = np.asarray(terminated_list,  dtype=np.float32)
                 truncated_np        = np.asarray(truncated_list,   dtype=np.float32)
                 task_invert_np      = np.asarray(task_invert_list, dtype=np.float32)
-                vel_rew_np          = np.asarray(vel_rew_list, dtype=np.float32) 
+                vel_rew_np          = np.asarray(vel_rew_list,     dtype=np.float32) 
+                pos_rew_np          = np.asarray(pos_rew_list,     dtype=np.float32)
+                progress_np         = np.asarray(progress_list,    dtype = np.float32)
                     
                 replaybuffer.store_episode_stacked(
-                states_np, actions_np, next_states_np, rewards_np, terminated_np, truncated_np, task_invert_np, vel_rew_np
+                states_np, actions_np, next_states_np, rewards_np, terminated_np, truncated_np, task_invert_np, vel_rew_np, pos_rew_np, progress_np
                 )
                 
             else:
                 # Build episode as list of tuples (CPU buffer)
             
                 episode = list(zip(
-                    states_list, acts_list, next_states_list, rews_list, terminated_list, truncated_list, task_invert_list, vel_rew_list
+                    states_list, acts_list, next_states_list, rews_list, terminated_list, truncated_list, task_invert_list, vel_rew_list, pos_rew_list, progress_list
                     ))
                 
                 episodes_cpu.append(episode)

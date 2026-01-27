@@ -1,7 +1,7 @@
 import torch
 import os
 import gymnasium as gym
-from .task_wrapper import InvertedVelocityWrapper
+from .task_wrapper import InvertedVelocityWrapper, GoalPositionWrapper
 
 
 def limit_threads(n: int):
@@ -18,6 +18,8 @@ def limit_threads(n: int):
 def maybe_wrap_task(env, args):
     if getattr(args, "task_mode", "default") == "inverted":
         env = InvertedVelocityWrapper(env, args)
+    if getattr(args, "task_mode", "default") == "target_goal":
+        env = GoalPositionWrapper(env, args)
     return env
 
 

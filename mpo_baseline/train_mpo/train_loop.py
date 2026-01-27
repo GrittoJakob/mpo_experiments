@@ -229,7 +229,13 @@ def train_loop(
                     mean_pos_ret, mean_neg_return = replaybuffer.mean_vel_pos_neg_ret()
                     writer.add_scalar("buffer/mean_vel_pos_return", mean_pos_ret, grad_updates)
                     writer.add_scalar("buffer/mean_vel_neg_return", mean_neg_return, grad_updates)
-                
+                if args.task_mode == "target_goal":
+                    writer.add_scalar("buffer/mean_position_return", replaybuffer.mean_pos_ret(), grad_updates)
+                    writer.add_scalar("buffer/mean_position_reward", replaybuffer.mean_pos_rew(), grad_updates)
+                    writer.add_scalar("buffer/mean_progress", replaybuffer.mean_progress(), grad_updates)
+                    writer.add_scalar("buffer/mean_vel_return", replaybuffer.mean_vel_ret(), grad_updates)
+                    writer.add_scalar("buffer/mean_vel_reward", replaybuffer.mean_vel_rew(), grad_updates)
+
                 # M-Step Loggingd
                 writer.add_scalar("m-step/loss_p", stats_m["loss_p"], grad_updates)
                 writer.add_scalar("m-step/loss_l", stats_m["loss_l"], grad_updates)

@@ -21,13 +21,23 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
         total_rewards = []
         episode_len = []
         action_list = []
-        target_curriculum = [1.0, -1.0]
+        if args.task_mode == "inverted":
+            eval_tasks = [{"task_mode": 1.0}, {"task_mode": -1.0}]
+        elif args.task_mode == "target_goal":
+            R = float(getattr(args, "goal_radius", 5.0))
+            goals = [
+                ( R, 0.0), (-R, 0.0), (0.0,  R), (0.0, -R),
+                ( R,  R), ( R, -R), (-R,  R), (-R, -R),
+            ]
+            eval_tasks = [{"target_goal": g} for g in goals]
+
+        else:
+            eval_tasks = [None]
+
         for ep_idx in range(args.evaluate_episode_num):
-            for target in target_curriculum:
-                if args.task_mode == "inverted":
-                    options={"task_mode": target} # set task mode for eval env forward/backward
-                else:    
-                    options = None
+            for task_options in eval_tasks:
+                
+                options = task_options 
                 total_reward = 0.0
                 ep_steps= 0.0
                 # Reset environment at the beginning of each episode
@@ -59,6 +69,12 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                     state =  next_state
                 total_rewards.append(total_reward)
                 episode_len.append(ep_steps)
+
+                if args.task_mode == "target_goal" and task_options is not None:
+                    gx, gy = task_options["target_goal"]
+                    # Tag
+                    tag = f"eval/return_goal_x{gx:.1f}_y{gy:.1f}".replace("-", "m").replace(".", "p")
+                    writer.add_scalar(tag, total_reward, global_step)
 
                 # 3. Logging (Now robust and wrapper-independent)
 

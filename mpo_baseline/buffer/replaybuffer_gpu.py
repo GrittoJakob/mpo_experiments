@@ -40,6 +40,8 @@ class ReplayBufferGPU:
         self._truncated: Optional[torch.Tensor] = None        # (N, 1) float32 0/1
         self._task_invert: Optional[torch.Tensor] = None
         self._vel_rew: Optional[torch.Tensor] = None
+        self._pos_rew: Optional[torch.Tensor] = None
+        self._progress: Optional[torch.Tensor] = None
 
 
         # Ring pointers: logical window is [start .. start+size) modulo N
@@ -47,7 +49,7 @@ class ReplayBufferGPU:
         self._size: int = 0
 
         # Episode FIFO metadata: (length, return_sum, mean_reward)
-        self._episodes: Deque[Tuple[int, float, float, float, float, bool]] = deque()
+        self._episodes: Deque[Tuple[int, float, float, float, float, float, float, float, float , float]] = deque()
 
         # Optional step-wise API (kept for compatibility)
         self.tmp_episode_buff: List[Tuple[Any, Any, Any, Any, Any, Any, Any, Any]] = []
@@ -73,6 +75,8 @@ class ReplayBufferGPU:
         self._truncated = torch.empty((N, 1), device=self.device, dtype=self.dtype)
         self._task_invert = torch.empty((N,1), device = self.device, dtype = self.dtype)
         self._vel_rew = torch.empty((N,1), device= self.device, dtype = self.dtype)
+        self._pos_rew = torch.empty((N,1), device=self.device, dtype=self.dtype)
+        self._progress = torch.empty((N,1), device=self.device, dtype=self.dtype)
 
     @staticmethod
     def _to_2d(x: torch.Tensor) -> torch.Tensor:
@@ -145,6 +149,8 @@ class ReplayBufferGPU:
         truncated: torch.Tensor,
         task_invert: torch.Tensor,
         vel_rew: torch.Tensor,
+        pos_rew: torch.Tensor,
+        progress: torch.Tensor,
     ) -> None:
         """
         Append one episode (L transitions) into the GPU ring buffer.
@@ -167,6 +173,8 @@ class ReplayBufferGPU:
             truncated = truncated[-keep:]
             task_invert = task_invert[-keep:]
             vel_rew = vel_rew[-keep:]
+            pos_rew = pos_rew[-keep:]
+            progress = progress[-keep:]
             L = keep
 
         # Allocate on first use
@@ -185,6 +193,8 @@ class ReplayBufferGPU:
         truncated_g = truncated.to(self.device, dtype=self.dtype, non_blocking=True)
         task_invert_g = task_invert.to(self.device, dtype=self.dtype, non_blocking= True)
         vel_rew_g = vel_rew.to(self.device, dtype=self.dtype, non_blocking=True)
+        pos_rew_g = pos_rew.to(self.device, dtype=self.dtype, non_blocking=True)
+        progress_g = progress.to(self.device, dtype=self.dtype, non_blocking=True)
 
         assert self._states is not None
         assert self._actions is not None
@@ -194,6 +204,8 @@ class ReplayBufferGPU:
         assert self._truncated is not None
         assert self._task_invert is not None
         assert self._vel_rew is not None
+        assert self._pos_rew is not None
+        assert self._progress is not None
 
         self._write_block(self._states, states_g, write_pos)
         self._write_block(self._actions, actions_g, write_pos)
@@ -203,13 +215,33 @@ class ReplayBufferGPU:
         self._write_block(self._truncated, truncated_g, write_pos)
         self._write_block(self._task_invert, task_invert_g, write_pos)
         self._write_block(self._vel_rew, vel_rew_g, write_pos)
+        self._write_block(self._pos_rew, pos_rew_g, write_pos)
+        self._write_block(self._progress, progress_g, write_pos)
 
-        task_invert_b = bool(task_invert[0].detach().cpu())
+        task_invert_v = float(task_invert[0].detach().cpu().item())
         ep_return = float(rewards.sum().detach().cpu())
         ep_mean_reward = float(rewards.mean().detach().cpu())
         ep_vel_return = float(vel_rew.sum().detach().cpu())
         ep_vel_reward = float(vel_rew.mean().detach().cpu())
-        self._episodes.append((L, ep_return, ep_mean_reward, ep_vel_return, ep_vel_reward, task_invert_b))
+        ep_pos_return = float(pos_rew.sum().detach().cpu())
+        ep_pos_reward= float(pos_rew.mean().detach().cpu())
+        ep_prog_return = float(progress.sum().detach().cpu())
+        ep_prog_mean = float(progress.mean().detach().cpu())
+
+        # Episode FIFO metadata:
+        # (L, ep_return, ep_mean_reward,
+        #  ep_vel_return, ep_vel_mean,
+        #  ep_pos_return, ep_pos_mean,
+        #  ep_prog_return, ep_prog_mean,
+        #  task_invert)
+        self._episodes.append((
+            L, ep_return, ep_mean_reward,
+            ep_vel_return, ep_vel_reward,
+            ep_pos_return, ep_pos_reward,
+            ep_prog_return, ep_prog_mean,
+            task_invert_v
+        ))
+
         self._size += L
 
     # -------------------- Storage API --------------------
@@ -254,8 +286,14 @@ class ReplayBufferGPU:
 
             task_invert_t = self._to_col(torch.as_tensor(task_invert, dtype= self.dtype, device="cpu"))
             vel_rew_t = self._to_col(torch.as_tensor(vel_rew, dtype= self.dtype, device="cpu"))
-            self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t, task_invert_t, vel_rew_t)
-
+            pos_rew_t = self._to_col(torch.as_tensor(pos_rew, dtype=self.dtype, device="cpu"))
+            progress_t = self._to_col(torch.as_tensor(progress, dtype=self.dtype, device="cpu"))
+            self._append_episode(
+                    states_t, actions_t, next_states_t, rewards_t,
+                    terminated_t, truncated_t, task_invert_t, vel_rew_t,
+                    pos_rew_t, progress_t
+                )
+        
     def store_episode_stacked(
         self,
         states,
@@ -266,6 +304,8 @@ class ReplayBufferGPU:
         truncated=None,
         task_invert=1.0,
         vel_rew=0.0,
+        pos_rew=0.0,
+        progress=0.0,
     ) -> None:
         """
         Store one episode as stacked arrays/tensors.
@@ -294,6 +334,8 @@ class ReplayBufferGPU:
         rewards_t = self._to_col(to_cpu_tensor(rewards))
         task_invert_t= self._to_col(to_cpu_tensor(task_invert))
         vel_rew_t = self._to_col(to_cpu_tensor(vel_rew))
+        pos_rew_t = self._to_col(to_cpu_tensor(pos_rew))
+        progress_t = self._to_col(to_cpu_tensor(progress))
 
         L = int(states_t.shape[0])
         if terminated is None:
@@ -306,7 +348,11 @@ class ReplayBufferGPU:
         else:
             truncated_t = self._to_col(to_cpu_tensor(truncated))
 
-        self._append_episode(states_t, actions_t, next_states_t, rewards_t, terminated_t, truncated_t, task_invert_t, vel_rew_t)
+        self._append_episode(
+            states_t, actions_t, next_states_t, rewards_t,
+            terminated_t, truncated_t, task_invert_t, vel_rew_t,
+            pos_rew_t, progress_t
+        )
 
     # -------------------- Sampling API --------------------
 
@@ -405,42 +451,70 @@ class ReplayBufferGPU:
         )
 
     # -------------------- Stats --------------------
-
     def mean_reward(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(mean_rew for _, _, mean_rew, _, _,_ in self._episodes) / len(self._episodes))
+        return float(sum(ep_mean for _, _, ep_mean, _, _, _, _, _, _, _ in self._episodes) / len(self._episodes))
 
     def mean_return(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(ret for _, ret, _, _, _,_ in self._episodes) / len(self._episodes))
+        return float(sum(ep_ret for _, ep_ret, _, _, _, _, _, _, _, _ in self._episodes) / len(self._episodes))
 
     def mean_episode_length(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(L for L, _, _, _ in self._episodes) / len(self._episodes))
+        return float(sum(L for L, _, _, _, _, _, _, _, _, _ in self._episodes) / len(self._episodes))
+
     def mean_vel_rew(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(vel_rew for _, _, _,_,vel_rew, _ in self._episodes) / len(self._episodes))
+        # ep_vel_mean is 5th field (index 4)
+        return float(sum(ep_vel_mean for _, _, _, _, ep_vel_mean, _, _, _, _, _ in self._episodes) / len(self._episodes))
+
     def mean_vel_ret(self) -> float:
         if not self._episodes:
             return 0.0
-        return float(sum(vel_ret for _,_,_,vel_ret, _,_ in self._episodes) / len(self._episodes))
-    
-    def mean_vel_pos_neg_ret(self):
+        # ep_vel_return is 4th field (index 3)
+        return float(sum(ep_vel_ret for _, _, _, ep_vel_ret, _, _, _, _, _, _ in self._episodes) / len(self._episodes))
+
+    def mean_pos_rew(self) -> float:
         if not self._episodes:
             return 0.0
-        mean_vel_pos_ret = 0.0
-        mean_vel_neg_ret = 0.0
-    
-        for _,_,_,mean_vel_ret,_,task_invert in self._episodes:
+        # ep_pos_mean is 7th field (index 6)
+        return float(sum(ep_pos_mean for _, _, _, _, _, _, ep_pos_mean, _, _, _ in self._episodes) / len(self._episodes))
+
+    def mean_pos_ret(self) -> float:
+        if not self._episodes:
+            return 0.0
+        # ep_pos_return is 6th field (index 5)
+        return float(sum(ep_pos_ret for _, _, _, _, _, ep_pos_ret, _, _, _, _ in self._episodes) / len(self._episodes))
+
+    def mean_progress(self) -> float:
+        if not self._episodes:
+            return 0.0
+        # ep_prog_mean is 9th field (index 8)
+        return float(sum(ep_prog_mean for _, _, _, _, _, _, _, _, ep_prog_mean, _ in self._episodes) / len(self._episodes))
+
+    def mean_vel_pos_neg_ret(self):
+        if not self._episodes:
+            return 0.0, 0.0
+
+        pos_sum = neg_sum = 0.0
+        pos_n = neg_n = 0
+
+        for (_, _, _, ep_vel_ret, _, _, _, _, _, task_invert) in self._episodes:
             if task_invert > 0:
-                mean_vel_pos_ret += mean_vel_ret
+                pos_sum += ep_vel_ret
+                pos_n += 1
             else:
-                mean_vel_neg_ret += mean_vel_ret
-        return float(mean_vel_pos_ret / len(self._episodes)), float(mean_vel_neg_ret / len(self._episodes))
+                neg_sum += ep_vel_ret
+                neg_n += 1
+
+        pos_mean = pos_sum / pos_n if pos_n else 0.0
+        neg_mean = neg_sum / neg_n if neg_n else 0.0
+        return float(pos_mean), float(neg_mean)
+
 
     # -------------------- Save/Load --------------------
 
