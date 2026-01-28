@@ -136,24 +136,29 @@ class GoalPositionWrapper(gym.Wrapper):
 
     def reset(self, seed=None, options=None):
         options_env = dict(options) if options else None
+        target_goal = None
         if options_env and "target_goal" in options_env:
-            options_env.pop("target_goal")
+            target_goal = options_env.pop("target_goal")
         obs, info = self.env.reset(seed=seed, options=options_env)
 
+        if target_goal is not None:
+            self.goal = np.array(target_goal, dtype=np.float64)
+        else:
+            self.goal = self._sample_goal()
 
-        xy = self._get_xy_from_info(info)
-        self.prev_xy = xy.copy()
+        xy_pos= self._get_xy_from_info(info)
+        self.prev_xy_pos = xy_pos.copy()
 
-        obs = np.append(obs, self._hint(xy))
+        obs = np.append(obs, self._hint(xy_pos))
 
         info["goal_x"] = float(self.goal[0])
         info["goal_y"] = float(self.goal[1])
-        info["distance_to_goal"] = float(np.linalg.norm(self.goal - xy))
+        info["distance_to_goal"] = float(np.linalg.norm(self.goal - xy_pos))
         return obs, info
 
     def step(self, action):
         # Save prev pos
-        prev_xy_pos = self.prev_xy.copy()
+        prev_xy_pos = self.prev_xy_pos.copy()
 
         obs, reward, terminated, truncated, info = self.env.step(action)
 
@@ -184,7 +189,6 @@ class GoalPositionWrapper(gym.Wrapper):
         if vel_rew < 0:
             vel_rew *= self.scale_wrong_direction
 
-        # --- Position term (optional): progress shaping ---
         dist_now = float(np.linalg.norm(self.goal - xy_pos))
         progress = float(dist_prev - dist_now)  # >0 wenn näher gekommen
 

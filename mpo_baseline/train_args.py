@@ -23,7 +23,7 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "fsandco"
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 250
     "number of global updates per log to wandb"
@@ -52,9 +52,9 @@ class Args:
     """hidden size of actor network"""
     hidden_size_critic: int = 512
     """hidden size of critc network"""
-    actor_lr: float = 2e-4
+    actor_lr: float = 1e-4
     """Learning rate for actor Adam optimizer"""
-    critic_lr: float = 3e-4
+    critic_lr: float = 1e-4
     """Learning rate for critic adam optimizer"""
     eta_lr : float = 1e-3
     "Learning rate for dual function"
@@ -76,13 +76,13 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_replay_buffer: int = 800000
+    max_replay_buffer: int = 15000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
     warm_up_steps: int = 10000
     """number of warm-up steps for the buffer"""
-    delay_policy_update: int = 1
+    delay_policy_update: int = 2
     """number of critic updates per policy update"""
     init_eta_mu: float = 0.5
     """int value of eta mu"""
@@ -96,7 +96,7 @@ class Args:
     """flag for using action penalty"""
     eps_penalty:float = 1e-3
     """constrain for action penalty loss term"""
-    penalty_mix: float = 0.5
+    penalty_mix: float = 0.49
     """parameter for mixing dual_losses in E-Step (action penalty and normal dual loss)"""
     use_action_clipping: bool = True
     """whether to use action clipping in rollout to save clipped action or not"""
@@ -157,7 +157,7 @@ class Args:
     # ===============================
     # Reward shaping for ant env
     # ===============================
-    ctrl_cost_weight: float = 0.7
+    ctrl_cost_weight: float = 0.5
     """ Weight for ctrl_cost term, default = 0.5"""
     healthy_reward_weight: float = 1.2
     """Weight for healthy_reward term, default = 1.2"""
@@ -176,8 +176,8 @@ class Args:
     """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
     velocity_reward_scale: float = 1.4
     """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.4
+    scale_wrong_direction_reward: float = 1.0
     """scale parameter for scale if velocity is wrong direction"""
-    position_reward_scale: float = 0.4
-    goal_radius: float = 5
-    success_radius: float = 0.5
+    position_reward_scale: float = 5
+    goal_radius: float = 50
+    success_radius: float = 1

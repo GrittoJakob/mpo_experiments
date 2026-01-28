@@ -108,16 +108,15 @@ class ReplayBufferGPU:
         else:
             buf[write_pos:] = data[:end_space]
             buf[: T - end_space] = data[end_space:]
-
     def _evict_one_episode(self) -> None:
-        """Evict the oldest episode (FIFO)."""
         if not self._episodes:
             return
-        ep_len, _, _ = self._episodes.popleft()
+        ep_len, *_ = self._episodes.popleft()  
         self._start = (self._start + ep_len) % self.max_transitions
         self._size -= ep_len
         if self._size < 0:
             self._size = 0
+
 
     def _ensure_capacity_for(self, extra: int) -> None:
         """Evict episodes until we have room for `extra` transitions."""
