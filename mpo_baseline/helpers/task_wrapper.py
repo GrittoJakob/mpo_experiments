@@ -160,13 +160,13 @@ class GoalPositionWrapper(gym.Wrapper):
         # Save prev pos
         prev_xy_pos = self.prev_xy_pos.copy()
 
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        obs_raw, reward, terminated, truncated, info = self.env.step(action)
 
         xy_pos = self._get_xy_from_info(info)
         self.prev_xy_pos = xy_pos.copy()
 
         # Inject hint
-        obs = np.append(obs, self._hint(xy_pos))
+        obs = np.append(obs_raw, self._hint(xy_pos))
 
         # split base reward and replace it by new reward for position and velocitiy
         reward_forward = info.get("reward_forward", 0.0)
@@ -199,7 +199,10 @@ class GoalPositionWrapper(gym.Wrapper):
         # Wenn du willst:
         if reached:
             pos_rew += 10.0
-            terminated = terminated or reached
+
+            self.goal = self._sample_goa()
+            obs =  np.append(obs_raw, self._hint(xy_pos))
+
 
         total_reward = base_reward + vel_rew + pos_rew
 

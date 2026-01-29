@@ -68,7 +68,7 @@ class Args:
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
     alpha_var_scale: float = 0.5
     """learning rate / scale factor for updating eta_sigma (variance KL Lagrange multiplier)"""
-    alpha_mean_max: float = 2.0
+    alpha_mean_max: float = 4.0
     """maximum clamp value for eta_mu (mean KL Lagrange multiplier)"""
     alpha_var_max: float = 100.00
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
@@ -76,11 +76,11 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_replay_buffer: int = 15000
+    max_replay_buffer: int = 1000000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
-    warm_up_steps: int = 10000
+    warm_up_steps: int = 15000
     """number of warm-up steps for the buffer"""
     delay_policy_update: int = 2
     """number of critic updates per policy update"""
@@ -179,5 +179,5 @@ class Args:
     scale_wrong_direction_reward: float = 1.0
     """scale parameter for scale if velocity is wrong direction"""
     position_reward_scale: float = 5
-    goal_radius: float = 50
-    success_radius: float = 1
+    goal_radius: float = 25
+    success_radius: float = 2
