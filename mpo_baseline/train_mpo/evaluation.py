@@ -9,28 +9,14 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     Run evaluation episodes using the current policy (self.actor)
     and return the average total reward per episode.
     """
-    # print("eval_env.action_space.low/high:",
-    #   eval_env.action_space.low.min(), eval_env.action_space.high.max())
 
-    # if hasattr(eval_env, "unwrapped"):
-    #     print("eval_env.unwrapped.action_space.low/high:",
-    #     eval_env.unwrapped.action_space.low.min(), eval_env.unwrapped.action_space.high.max())
 
-    # No gradients needed during evaluation
     with torch.no_grad():
         total_rewards = []
         episode_len = []
         action_list = []
         if args.task_mode == "inverted":
             eval_tasks = [{"task_mode": 1.0}, {"task_mode": -1.0}]
-        # elif args.task_mode == "target_goal":
-        #     R = float(getattr(args, "goal_radius", 5.0))
-        #     goals = [
-        #         ( R, 0.0), (-R, 0.0), (0.0,  R), (0.0, -R),
-        #         ( R,  R), ( R, -R), (-R,  R), (-R, -R),
-        #     ]
-        #     eval_tasks = [{"target_goal": g} for g in goals]
-
         else:
             eval_tasks = [None]
 

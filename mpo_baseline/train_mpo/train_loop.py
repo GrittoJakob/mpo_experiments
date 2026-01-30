@@ -18,6 +18,8 @@ from rollout.rollout import collect_rollout
 from rollout.video_rollout import log_one_episode_video
 from train_mpo.evaluation import evaluate
 from helpers.sample_minibatch import sample_minibatch, assert_batch_shapes
+from helpers.store_trajectory import store_trajectory
+from helpers.logging import logging_wandb
 
 
 
@@ -71,6 +73,7 @@ def train_loop(
     runtime_sample_minibatch = 0.0
     runtime_sample_actions = 0.0
     runtime_t_critic_forward = 0.0
+    best_video_reward = 0.0
 
     print(f"[DEBUG] start with number of steps = {len(replaybuffer)}, maximal number of environment steps: {max_training_steps}")       
 
@@ -96,7 +99,18 @@ def train_loop(
         
         if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
-            log_one_episode_video(args, mpo.actor, device, prefix, num_steps)
+            trajectory, video_reward =  log_one_episode_video(args, mpo.actor, device, prefix, num_steps)
+            if video_reward > best_video_reward:
+                best_video_reward = video_reward
+                store_trajectory(
+                    trajectory,
+                    args=args,
+                    global_step=num_steps,
+                    reward=video_reward,
+                    name=f"best_video_traj_{prefix}",
+                )
+
+
 
         # For terminal logging
         pbar.update(new_steps)
@@ -185,7 +199,7 @@ def train_loop(
 
                 # M-step (actor / policy update)
                 t_M_step_start = time.perf_counter()
-                stats_m = mpo.maximization_step(
+                stats_m_step = mpo.maximization_step(
                     state_batch=state_batch,
                     norm_target_q = norm_target_q, 
                     sampled_actions = sampled_actions, 
@@ -198,94 +212,29 @@ def train_loop(
 
             # logging 
             if args.wandb_track and i_update % args.log_period == 0:
-                
-                # Compute mean reward/return in replay buffer
-                mean_reward_buffer = replaybuffer.mean_reward()
-                mean_return_buffer = replaybuffer.mean_return() 
-                mean_episode_len = mean_return_buffer/(mean_reward_buffer+ 1e-8)                
-                
-                # Timing
-                writer.add_scalar("time/rollout_time_sec", runtime_rollout, grad_updates)
-                writer.add_scalar("time/E-Step", runtime_E_step, grad_updates)
-                writer.add_scalar("time/M-Step", runtime_M_step, grad_updates)
-                writer.add_scalar("time/critic_update", runtime_policy_eval, grad_updates)
-                writer.add_scalar("time/evaluation", runtime_eval, grad_updates)
-                writer.add_scalar("time/sample_from_buffer", runtime_sample_minibatch, grad_updates)
-                writer.add_scalar("time/t_critic_foward_pass", runtime_t_critic_forward, grad_updates)
-                writer.add_scalar("time/sample_actions", runtime_sample_actions, grad_updates)
-                
-                writer.add_scalar("charts/learning_rate_actor", mpo.actor_optimizer.param_groups[0]["lr"], grad_updates)
-                writer.add_scalar("charts/learning_rate_critic", mpo.critic_optimizer.param_groups[0]["lr"], grad_updates)
+                runtime = {
+                    "rollout_time_sec": runtime_rollout,
+                    "E-Step": runtime_E_step,
+                    "M-Step": runtime_M_step,
+                    "critic_update": runtime_policy_eval,
+                    "evaluation": runtime_eval,
+                    "sample_from_buffer": runtime_sample_minibatch,
+                    "t_critic_foward_pass": runtime_t_critic_forward,
+                    "sample_actions": runtime_sample_actions,
+                }
+                logging_wandb(
+                    writer = writer,
+                    args = args,
+                    replaybuffer = replaybuffer,
+                    runtime = runtime, 
+                    stats_m_step = stats_m_step,
+                    stats_e_step = stats_e_step,
+                    critic_update_stats = critic_update_stats,
+                    grad_updates = grad_updates, 
+                    num_steps = num_steps
+                )
 
-                #  Buffer
-                writer.add_scalar("buffer/size", len(replaybuffer) ,grad_updates)
-                writer.add_scalar("buffer/mean_return", mean_return_buffer , grad_updates)
-                writer.add_scalar("buffer/mean_reward_per_step", mean_reward_buffer ,grad_updates)
-                writer.add_scalar("buffer/mean_episode_len", mean_episode_len, grad_updates)
-                writer.add_scalar("buffer/total_num_steps",num_steps, grad_updates)
-                if args.task_mode == "inverted":
-                    writer.add_scalar("buffer/mean_vel_return", replaybuffer.mean_vel_ret(), grad_updates)
-                    writer.add_scalar("buffer/mean_vel_reward", replaybuffer.mean_vel_rew(), grad_updates)
-                    mean_pos_ret, mean_neg_return = replaybuffer.mean_vel_pos_neg_ret()
-                    writer.add_scalar("buffer/mean_vel_pos_return", mean_pos_ret, grad_updates)
-                    writer.add_scalar("buffer/mean_vel_neg_return", mean_neg_return, grad_updates)
-                if args.task_mode == "target_goal":
-                    writer.add_scalar("buffer/mean_position_return", replaybuffer.mean_pos_ret(), grad_updates)
-                    writer.add_scalar("buffer/mean_position_reward", replaybuffer.mean_pos_rew(), grad_updates)
-                    writer.add_scalar("buffer/mean_progress", replaybuffer.mean_progress(), grad_updates)
-                    writer.add_scalar("buffer/mean_vel_return", replaybuffer.mean_vel_ret(), grad_updates)
-                    writer.add_scalar("buffer/mean_vel_reward", replaybuffer.mean_vel_rew(), grad_updates)
-
-                # M-Step Loggingd
-                writer.add_scalar("m-step/loss_p", stats_m["loss_p"], grad_updates)
-                writer.add_scalar("m-step/loss_l", stats_m["loss_l"], grad_updates)
-                writer.add_scalar("m-step/C_mu_mean", stats_m["C_mu_mean"], grad_updates)
-                writer.add_scalar("m-step/C_sigma_mean", stats_m["C_sigma_mean"], grad_updates)
-                writer.add_scalar("m-step/eta_mu_mean", stats_m["eta_mu_mean"], grad_updates)
-                writer.add_scalar("m-step/eta_mu_max", stats_m["eta_mu_max"], grad_updates)
-                writer.add_scalar("m-step/eta_mu_min", stats_m["eta_mu_min"], grad_updates)
-                writer.add_scalar("m-step/eta_sigma_mean", stats_m["eta_sigma_mean"], grad_updates)
-                writer.add_scalar("m-step/eta_sigma_min", stats_m["eta_sigma_min"], grad_updates)
-                writer.add_scalar("m-step/eta_sigma_max", stats_m["eta_sigma_max"], grad_updates)
-                writer.add_scalar("m-step/mu_mean", stats_m["mu_mean"], grad_updates)
-                writer.add_scalar("m-step/std_mean", stats_m["std_mean"], grad_updates)
-                writer.add_scalar("m-step/std_min", stats_m["std_min"], grad_updates)
-                writer.add_scalar("m-step/std_max", stats_m["std_max"], grad_updates)
-                writer.add_scalar("m-step/mu_min", stats_m["mu_min"], grad_updates)
-                writer.add_scalar("m-step/mu_max", stats_m["mu_max"], grad_updates)
-                
-                # E-Step Logging
-                writer.add_scalar("e-step/eta_dual", stats_e_step["eta_dual"].item(), grad_updates)
-                # weights diagnostics (always present)
-                writer.add_scalar("e-step/norm_target_q_mean", stats_e_step["norm_target_q_mean"].item(), grad_updates)
-                writer.add_scalar("e-step/norm_target_q_min",  stats_e_step["norm_target_q_min"].item(),  grad_updates)
-                writer.add_scalar("e-step/norm_target_q_max",  stats_e_step["norm_target_q_max"].item(),  grad_updates)
-                writer.add_scalar("e-step/loss_dual",          stats_e_step["loss_dual"].item(),          grad_updates)
-                # optional: only if action penalty is enabled / present in stats
-                if "eta_penalty" in stats_e_step:
-                    writer.add_scalar("e-step/eta_penalty", stats_e_step["eta_penalty"].item(), grad_updates)
-
-                    writer.add_scalar("e-step/diff_out_abs_mean", stats_e_step["diff_out_abs_mean"].item(), grad_updates)
-                    writer.add_scalar("e-step/diff_out_abs_max",  stats_e_step["diff_out_abs_max"].item(),  grad_updates)
-
-                    writer.add_scalar("e-step/norm_weights_mean", stats_e_step["norm_weights_mean"].item(), grad_updates)
-                    writer.add_scalar("e-step/norm_weights_min",  stats_e_step["norm_weights_min"].item(),  grad_updates)
-                    writer.add_scalar("e-step/norm_weights_max",  stats_e_step["norm_weights_max"].item(),  grad_updates)
-
-                    writer.add_scalar("e-step/penalty_weights_mean", stats_e_step["penalty_weights_mean"].item(), grad_updates)
-                    writer.add_scalar("e-step/penalty_weights_min",  stats_e_step["penalty_weights_min"].item(),  grad_updates)
-                    writer.add_scalar("e-step/penalty_weights_max",  stats_e_step["penalty_weights_max"].item(),  grad_updates)
-
-                    writer.add_scalar("e-step/loss_penalty", stats_e_step["loss_penalty"].item(), grad_updates)
-
-
-                # Retrace Logging
-                writer.add_scalar("critic_update/q_loss", critic_update_stats["critic_loss"], grad_updates)
-                writer.add_scalar("critic_update/q_current_mean", critic_update_stats["q_current_mean"], grad_updates)
-                writer.add_scalar("critic_update/q_target_mean", critic_update_stats["q_target_mean"], grad_updates)
-                writer.add_scalar("critic_update/terminated_rate", critic_update_stats["terminated_rate"], grad_updates)
-                writer.add_scalar("critic_update/truncated_rate", critic_update_stats["truncated_rate"], grad_updates)
-
+             
             # Target network update & logging
             # Periodically sync target networks with current actor/critic
             if grad_updates % args.target_update_period == 0:

@@ -30,22 +30,10 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
         task_options = [{"task_mode": 1.0}, {"task_mode": -1.0}]
         task_names   = ["forward", "backward"]
 
-    # elif args.task_mode == "target_goal":
-    #     R = float(getattr(args, "goal_radius", 5.0))
-    #     goal_list = [
-    #         ( R, 0.0), (-R, 0.0), (0.0,  R), (0.0, -R),
-    #         ( R,  R), ( R, -R), (-R,  R), (-R, -R),
-    #     ]
-    #     idx = np.random.choice(len(goal_list), size=2, replace=(len(goal_list) < 2))
-    #     g1, g2 = goal_list[int(idx[0])], goal_list[int(idx[1])]
-    #     task_options = [{"target_goal": g1}, {"target_goal": g2}]
-    #     task_names   = [f"goal{g1}", f"goal{g2}"]
-
     else:
         task_options = [None, None]
         task_names   = ["task1", "task2"]
 
-    # ---- record + log two videos ----
     for i, (env_options, task_name) in enumerate(zip(task_options, task_names), start=1):
         prefix = f"{name_prefix}_video{i}" if name_prefix else f"video_{i}"
 
@@ -53,7 +41,13 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
         before = set(glob.glob(os.path.join(video_folder, f"{prefix}*.mp4")))
 
         venv = make_video_env(args, args.run_name, prefix)
-        total_reward, steps = 0.0, 0
+        total_reward, best_reward, steps = 0.0, 0.0,  0
+
+
+        x_pos = []
+        y_pos = []
+        x_goal = []
+        y_goal = []
 
         try:
             actor.eval()
@@ -67,11 +61,20 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
                 while (not done) and (steps < max_steps):
                     st = torch.as_tensor(state, dtype=torch.float32, device=device)
                     action = actor.action(st, deterministic=True)
-                    state, reward, terminated, truncated, _ = venv.step(action)
+                    state, reward, terminated, truncated, info = venv.step(action)
+
+                    x_goal.append(info["goal_x"])
+                    y_goal.append(info["goal_y"])
+                    x_pos.append(info["x_position"])
+                    y_pos.append(info["y_position"])
+
                     done = bool(terminated or truncated)
                     total_reward += float(reward)
                     steps += 1
         finally:
+            if total_reward > best_reward:
+                best_reward = total_reward
+                trajectory = zip(x_goal, y_goal, x_pos, y_pos)
             actor.train()
             venv.close()
 
@@ -108,3 +111,5 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
             os.remove(mp4)
         except OSError:
             pass
+    
+    return trajectory, best_reward

@@ -149,7 +149,7 @@ class Args:
     # ===============================
     # warm up compilation
     # ===============================
-    use_compile: bool = True
+    use_compile: bool = False
     """torch.compilation flag"""
     compile_mode: str=  "default"
     """compile mode for torch compilation"""
