@@ -181,3 +181,4 @@ class Args:
     position_reward_scale: float = 5
     goal_radius: float = 25
     success_radius: float = 2
+    maximum_area: float = 100

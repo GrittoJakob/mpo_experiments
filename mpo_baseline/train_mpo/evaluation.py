@@ -23,13 +23,13 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
         action_list = []
         if args.task_mode == "inverted":
             eval_tasks = [{"task_mode": 1.0}, {"task_mode": -1.0}]
-        elif args.task_mode == "target_goal":
-            R = float(getattr(args, "goal_radius", 5.0))
-            goals = [
-                ( R, 0.0), (-R, 0.0), (0.0,  R), (0.0, -R),
-                ( R,  R), ( R, -R), (-R,  R), (-R, -R),
-            ]
-            eval_tasks = [{"target_goal": g} for g in goals]
+        # elif args.task_mode == "target_goal":
+        #     R = float(getattr(args, "goal_radius", 5.0))
+        #     goals = [
+        #         ( R, 0.0), (-R, 0.0), (0.0,  R), (0.0, -R),
+        #         ( R,  R), ( R, -R), (-R,  R), (-R, -R),
+        #     ]
+        #     eval_tasks = [{"target_goal": g} for g in goals]
 
         else:
             eval_tasks = [None]

@@ -10,6 +10,7 @@ class InvertedVelocityWrapper(gym.Wrapper):
         self.vel_scale = args.velocity_reward_scale
         self.scale_wrong_direction = args.scale_wrong_direction_reward
         
+        
         # 🟢 NEW: Curriculum Speed Limit
         self.current_max_speed = float('inf') 
 
@@ -91,10 +92,11 @@ class GoalPositionWrapper(gym.Wrapper):
         self.vel_scale = args.velocity_reward_scale
         self.pos_scale = args.position_reward_scale
         self.scale_wrong_direction = args.scale_wrong_direction_reward
+        self.maximum_area = args.maximum_area
 
         # Task sampling
-        self.goal_list = self.make_goal_list(args)  # i.e. [(5,0),(-5,0),(0,5),(0,-5)]
-        self.goal_radius = args.goal_radius
+        # self.goal_list = self.make_goal_list(args)  # i.e. [(5,0),(-5,0),(0,5),(0,-5)]
+        #self.goal_radius = args.goal_radius
         self.success_radius = args.success_radius
 
         # Internal state
@@ -107,13 +109,12 @@ class GoalPositionWrapper(gym.Wrapper):
         self.observation_space = gym.spaces.Box(low, high, dtype=np.float64)
 
     def _sample_goal(self):
-        if self.goal_list is not None and len(self.goal_list) > 0:
-            gx, gy = self.goal_list[np.random.randint(len(self.goal_list))]
-            return np.array([gx, gy], dtype=np.float64)
-        # If list is None: Continuous: uniform in a disk
-        r = self.goal_radius * np.sqrt(np.random.random())
-        theta = 2 * np.pi * np.random.random()
-        return np.array([r * np.cos(theta), r * np.sin(theta)], dtype=np.float64)
+        max_area = self.maximum_area
+        
+        x_goal = x = np.random.uniform(-max_area, max_area)
+        y_goal = x = np.random.uniform(-max_area, max_area)
+        #print(x_goal, y_goal)
+        return np.array([x_goal, y_goal], dtype=np.float64)
 
     def _get_xy_from_info(self, info):
         return np.array([info["x_position"], info["y_position"]], dtype=np.float64)
@@ -200,7 +201,7 @@ class GoalPositionWrapper(gym.Wrapper):
         if reached:
             pos_rew += 10.0
 
-            self.goal = self._sample_goa()
+            self.goal = self._sample_goal()
             obs =  np.append(obs_raw, self._hint(xy_pos))
 
 
@@ -218,8 +219,3 @@ class GoalPositionWrapper(gym.Wrapper):
 
         return obs, total_reward, terminated, truncated, info
 
-    def make_goal_list(self, args):
-        R = args.goal_radius
-        goal_list = [(R,0), (-R,0), (0,R), (0,-R),
-                (R,R), (R,-R), (-R,R), (-R,-R)]
-        return goal_list

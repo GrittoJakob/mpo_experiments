@@ -30,16 +30,16 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
         task_options = [{"task_mode": 1.0}, {"task_mode": -1.0}]
         task_names   = ["forward", "backward"]
 
-    elif args.task_mode == "target_goal":
-        R = float(getattr(args, "goal_radius", 5.0))
-        goal_list = [
-            ( R, 0.0), (-R, 0.0), (0.0,  R), (0.0, -R),
-            ( R,  R), ( R, -R), (-R,  R), (-R, -R),
-        ]
-        idx = np.random.choice(len(goal_list), size=2, replace=(len(goal_list) < 2))
-        g1, g2 = goal_list[int(idx[0])], goal_list[int(idx[1])]
-        task_options = [{"target_goal": g1}, {"target_goal": g2}]
-        task_names   = [f"goal{g1}", f"goal{g2}"]
+    # elif args.task_mode == "target_goal":
+    #     R = float(getattr(args, "goal_radius", 5.0))
+    #     goal_list = [
+    #         ( R, 0.0), (-R, 0.0), (0.0,  R), (0.0, -R),
+    #         ( R,  R), ( R, -R), (-R,  R), (-R, -R),
+    #     ]
+    #     idx = np.random.choice(len(goal_list), size=2, replace=(len(goal_list) < 2))
+    #     g1, g2 = goal_list[int(idx[0])], goal_list[int(idx[1])]
+    #     task_options = [{"target_goal": g1}, {"target_goal": g2}]
+    #     task_names   = [f"goal{g1}", f"goal{g2}"]
 
     else:
         task_options = [None, None]
