@@ -31,8 +31,8 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
         task_names   = ["forward", "backward"]
 
     else:
-        task_options = [None, None]
-        task_names   = ["task1", "task2"]
+        task_options = [None]
+        task_names   = ["task1"]
 
     for i, (env_options, task_name) in enumerate(zip(task_options, task_names), start=1):
         prefix = f"{name_prefix}_video{i}" if name_prefix else f"video_{i}"

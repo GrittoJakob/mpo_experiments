@@ -122,9 +122,9 @@ class Args:
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 5
+    evaluate_period: int = 10 
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 1
+    evaluate_episode_num: int = 8
     """how many evaluation episodes to run"""
     evaluate_episode_maxstep: int = 1000
     """max steps per evaluation episode"""
@@ -149,7 +149,7 @@ class Args:
     # ===============================
     # warm up compilation
     # ===============================
-    use_compile: bool = False
+    use_compile: bool = True
     """torch.compilation flag"""
     compile_mode: str=  "default"
     """compile mode for torch compilation"""
