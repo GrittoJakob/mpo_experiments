@@ -63,7 +63,7 @@ def train_loop(
 
     max_training_steps = args.max_training_steps
     num_steps = 0
-    it = 0
+    it = 1
     grad_updates = 0
     runtime_rollout = 0.0
     runtime_E_step = 0.0
@@ -100,7 +100,7 @@ def train_loop(
         if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
             trajectory, video_reward =  log_one_episode_video(args, mpo.actor, device, prefix, num_steps)
-            if video_reward > best_video_reward:
+            if video_reward > best_video_reward and args.track_trajectory:
                 best_video_reward = video_reward
                 store_trajectory(
                     trajectory,
@@ -140,8 +140,9 @@ def train_loop(
             )
             
             #Check for correct shapes
-            assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch,
-                    args.batch_size, mpo.state_dim, mpo.action_dim)
+            if (grad_updates-1) % 10000 == 0:
+                assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch,
+                        args.batch_size, mpo.state_dim, mpo.action_dim)
             sample_mbatch_end = time.time()
             runtime_sample_minibatch += sample_mbatch_end - sample_mbatch_start
 

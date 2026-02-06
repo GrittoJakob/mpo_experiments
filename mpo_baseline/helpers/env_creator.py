@@ -2,7 +2,7 @@ import torch
 import os
 import gymnasium as gym
 from .task_wrapper import InvertedVelocityWrapper, GoalPositionWrapper
-
+from .multi_task_wrapper import Multi_Task_InvertedWrapper
 
 def limit_threads(n: int):
     # PyTorch threads
@@ -20,6 +20,8 @@ def maybe_wrap_task(env, args):
         env = InvertedVelocityWrapper(env, args)
     if getattr(args, "task_mode", "default") == "target_goal":
         env = GoalPositionWrapper(env, args)
+    if getattr(args, "task_mode", "default") == "inverted_multi_task":
+        env = Multi_Task_InvertedWrapper(env, args, args.history_len, args.append_task_reward)
     return env
 
 
@@ -31,7 +33,8 @@ def make_train_env(args, env_id, seed):
             ctrl_cost_weight = args.ctrl_cost_weight,
             healthy_reward = args.healthy_reward_weight, 
             contact_cost_weight = args.contact_cost_weight,
-            forward_reward_weight = args.forward_reward_weight
+            forward_reward_weight = args.forward_reward_weight,
+            include_cfrc_ext_in_observation= args.include_cfrc_ext_in_observation
             )
 
     else: 
@@ -54,7 +57,8 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
             ctrl_cost_weight = args.ctrl_cost_weight,
             healthy_reward = args.healthy_reward_weight, 
             contact_cost_weight = args.contact_cost_weight,
-            forward_reward_weight = args.forward_reward_weight
+            forward_reward_weight = args.forward_reward_weight,
+            include_cfrc_ext_in_observation= args.include_cfrc_ext_in_observation
             )
 
         # in dieser (frisch erzeugten) video-env: genau Episode 0 aufnehmen

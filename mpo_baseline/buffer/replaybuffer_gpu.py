@@ -416,15 +416,24 @@ class ReplayBufferGPU:
         return self.batch_get(idx)
 
     def sample_batch_stacked(self, batch_size: int, replace: bool = False):
-        s, a, ns, r, term, trunc = self.sample_batch(batch_size, replace)
-        # single chunk -> just return that tensor
+        # direkt indizieren, ohne batch_get()/list/cat
+        idx = self._sample_indices(batch_size, replace)
+        storage_idx = (idx + self._start) % self.max_transitions
+
+        assert self._states is not None
+        assert self._actions is not None
+        assert self._next_states is not None
+        assert self._rewards is not None
+        assert self._terminated is not None
+        assert self._truncated is not None
+
         return (
-            torch.cat(s, dim=0),
-            torch.cat(a, dim=0),
-            torch.cat(ns, dim=0),
-            torch.cat(r, dim=0),
-            torch.cat(term, dim=0),
-            torch.cat(trunc, dim=0),
+            self._states[storage_idx],
+            self._actions[storage_idx],
+            self._next_states[storage_idx],
+            self._rewards[storage_idx],      # bereits (B,1)
+            self._terminated[storage_idx],   # bereits (B,1)
+            self._truncated[storage_idx],    # bereits (B,1)
         )
 
     def __getitem__(self, idx: int):

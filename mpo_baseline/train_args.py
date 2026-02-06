@@ -172,13 +172,20 @@ class Args:
     # ===============================
 
     ## in train_args.py 
-    task_mode: str = "target_goal" 
+    task_mode: str = "inverted_multi_task" 
     """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
-    velocity_reward_scale: float = 1.4
+    velocity_reward_scale: float = 1.5
     """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.0
+    scale_wrong_direction_reward: float = 1.5
     """scale parameter for scale if velocity is wrong direction"""
     position_reward_scale: float = 5
     goal_radius: float = 25
     success_radius: float = 2
     maximum_area: float = 100
+    history_len: int = 5
+    """lenght of history to append in obs"""
+    append_task_reward: bool = True
+    """to append the specific task reward in obs"""
+    track_trajectory: bool = False
+    include_cfrc_ext_in_observation: bool = False
+    """flag for exlude(/include central force terms in observations"""
