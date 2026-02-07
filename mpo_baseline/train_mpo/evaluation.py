@@ -15,10 +15,14 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
         total_rewards = []
         episode_len = []
         action_list = []
-        if args.task_mode == "inverted":
+        if args.task_mode == "inverted" or "inverted_multi_task":
             eval_tasks = [{"task_mode": 1.0}, {"task_mode": -1.0}]
         else:
             eval_tasks = [None]
+        # if args.rand_mode == "RFI":
+        #     options = {}
+        #     curr_rand_noise = 0.0
+        #     eval_tasks= [{"rao_limit": 0.0}]
 
         for ep_idx in range(args.evaluate_episode_num):
             for task_options in eval_tasks:

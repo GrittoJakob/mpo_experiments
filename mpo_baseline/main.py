@@ -12,7 +12,7 @@ import wandb
 from nets.actor import Actor
 from nets.critic import Critic
 from typing import Optional
-from helpers.env_creator import limit_threads, make_train_env, make_eval_env
+from helpers.env_creator import limit_threads, make_train_env, make_eval_env, make_train_vec_env
 from buffer.replaybuffer import ReplayBuffer
 from buffer.replaybuffer_gpu import ReplayBufferGPU
 from train_args import Args
@@ -28,7 +28,18 @@ def init_runname(args):
 
 
 def make_envs(args, run_name):
-    train_env = make_train_env(args, args.env_id, args.seed)
+    if args.num_envs > 1:
+        train_env = make_train_vec_env(
+            args, 
+            args.env_id,
+            args.seed,
+            args.num_envs,
+            args.asynchronous,
+            args.num_threads
+        )
+    else:
+        train_env = make_train_env(args, args.env_id, args.seed)
+    
     eval_env = make_eval_env(args, args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
     args.obs_space = train_env.observation_space.shape[0]
     args.action_dim = train_env.action_space.shape[0]
@@ -95,18 +106,18 @@ def train():
         gpu_buffer = False
 
     # action space
-    action_space = train_env.unwrapped.action_space
+    action_space = eval_env.unwrapped.action_space
     args.action_space_low  = action_space.low
     args.action_space_high = action_space.high
     print("action space:", args.action_space_low, args.action_space_high)
-    mpo = MPO(args,train_env, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device) 
+    mpo = MPO(args, eval_env, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device) 
     
     #  compile warmup 
     if getattr(args, "use_compile", True):
         mpo = warmup_mpo_compile(
             args=args,
             device=device,
-            env=train_env,          # wichtig: ein env reicht für shapes
+            env=train_env,          
             mpo=mpo,
             compile_mode=getattr(args, "compile_mode", "reduce-overhead"),
         )  

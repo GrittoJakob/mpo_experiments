@@ -27,7 +27,7 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 250
     "number of global updates per log to wandb"
-    num_threads: int = 8
+    num_threads: int = 16
     """number of threads to use"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
@@ -35,6 +35,8 @@ class Args:
     """iterations per logging exactly one episode video"""
     buffer_on_cuda: bool = True
     """store replay_buffer on cuda"""
+    num_envs: int = 1
+    asynchronous: bool = False
     
 
     # ===============================
@@ -124,7 +126,7 @@ class Args:
 
     evaluate_period: int = 10 
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 8
+    evaluate_episode_num: int = 4
     """how many evaluation episodes to run"""
     evaluate_episode_maxstep: int = 1000
     """max steps per evaluation episode"""
@@ -159,7 +161,7 @@ class Args:
     # ===============================
     ctrl_cost_weight: float = 0.5
     """ Weight for ctrl_cost term, default = 0.5"""
-    healthy_reward_weight: float = 1.2
+    healthy_reward_weight: float = 0.8
     """Weight for healthy_reward term, default = 1.2"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""
@@ -174,9 +176,9 @@ class Args:
     ## in train_args.py 
     task_mode: str = "inverted_multi_task" 
     """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
-    velocity_reward_scale: float = 1.5
+    velocity_reward_scale: float = 1.7
     """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.5
+    scale_wrong_direction_reward: float = 1.7
     """scale parameter for scale if velocity is wrong direction"""
     position_reward_scale: float = 5
     goal_radius: float = 25
@@ -189,3 +191,14 @@ class Args:
     track_trajectory: bool = False
     include_cfrc_ext_in_observation: bool = False
     """flag for exlude(/include central force terms in observations"""
+
+    
+    rand_mode: str = "RFI"
+    """the environment parametrization type for meta-learning""" # Currently supports ERFI, RAO, RFI, and None (no param randomization)
+    rand_split_ratio: float = 0.5
+    """the ratio at which to split the population for ERFI mode, if 0.9 the first 90% of the population uses RFI and the last 10% uses RAO"""
+    start_rand_noise: float = 0.0
+    """the initial randomization scale for the environment parameters sampling"""
+    final_rand_noise: float = 0.05
+    """the final randomization scale for the environment parameters sampling"""            
+
