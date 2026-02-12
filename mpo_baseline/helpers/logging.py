@@ -36,7 +36,7 @@ def logging_wandb(writer,args, replaybuffer, runtime,  stats_m_step, stats_e_ste
     writer.add_scalar("buffer/mean_reward_per_step", mean_reward_buffer ,grad_updates)
     writer.add_scalar("buffer/mean_episode_len", mean_episode_len, grad_updates)
     writer.add_scalar("buffer/total_num_steps", num_steps, grad_updates)
-    if args.task_mode == "inverted" or "inverted_multi_task":
+    if args.task_mode in ("inverted", "inverted_multi_task"):
         writer.add_scalar("buffer/mean_vel_return", replaybuffer.mean_vel_ret(), grad_updates)
         writer.add_scalar("buffer/mean_vel_reward", replaybuffer.mean_vel_rew(), grad_updates)
         mean_pos_ret, mean_neg_return = replaybuffer.mean_vel_pos_neg_ret()

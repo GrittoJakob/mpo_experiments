@@ -1,9 +1,6 @@
 import gymnasium as gym
 import numpy as np
 from collections import deque
-import gymnasium as gym
-import numpy as np
-from collections import deque
 
 class Multi_Task_InvertedWrapper(gym.Wrapper):
     def __init__(self, env, args, history_len=5, store_task_reward=False):

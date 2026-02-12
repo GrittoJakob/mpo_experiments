@@ -4,7 +4,7 @@ import os
 import gymnasium as gym
 from .task_wrapper import InvertedVelocityWrapper, GoalPositionWrapper
 from .multi_task_wrapper import Multi_Task_InvertedWrapper
-
+from .ERFI_Wrappers import RFIActionWrapper
 def limit_threads(n: int):
     # PyTorch threads
     torch.set_num_threads(n)
@@ -23,9 +23,10 @@ def maybe_wrap_task(env, args):
         env = GoalPositionWrapper(env, args)
     if getattr(args, "task_mode", "default") == "inverted_multi_task":
         env = Multi_Task_InvertedWrapper(env, args, args.history_len, args.append_task_reward)
-    # if args.rand_mode == "RFI":
-    #     # Apply RFI to ALL environments
-    #     env = mw.RFIActionWrapper(env, args.noise_limit)
+    if args.rand_mode == "RFI":
+        # Apply RFI to ALL environments
+        print("RFI is activated")
+        env = RFIActionWrapper(env, args.final_rand_noise)
     # elif args.rand_mode == "RAO":
     #     # Apply RAO to ALL environments
     #     env = mw.RAOActionWrapper(env, args.noise_limit)

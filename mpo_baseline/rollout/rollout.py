@@ -42,7 +42,7 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 vel_rew = 0.0
                 pos_rew = 0.0
                 progress = 0.0
-                if args.task_mode == "inverted" or "inverted_multi_task":
+                if args.task_mode in ("inverted", "inverted_multi_task"):
                     vel_rew = info['velocity_reward']
                     task_invert = info['task_direction']
                 elif args.task_mode == "target_goal":

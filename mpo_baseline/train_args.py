@@ -162,7 +162,7 @@ class Args:
     ctrl_cost_weight: float = 0.5
     """ Weight for ctrl_cost term, default = 0.5"""
     healthy_reward_weight: float = 0.8
-    """Weight for healthy_reward term, default = 1.2"""
+    """Weight for healthy_reward term, default = 1.2, 0.8 for multi task"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""
     forward_reward_weight: float = 1.0
@@ -186,18 +186,18 @@ class Args:
     maximum_area: float = 100
     history_len: int = 5
     """lenght of history to append in obs"""
-    append_task_reward: bool = True
+    append_task_reward: bool = False
     """to append the specific task reward in obs"""
     track_trajectory: bool = False
     include_cfrc_ext_in_observation: bool = False
-    """flag for exlude(/include central force terms in observations"""
+    """flag for exlude/include central force terms in observations"""
 
     
-    rand_mode: str = "RFI"
+    rand_mode: str = "default"
     """the environment parametrization type for meta-learning""" # Currently supports ERFI, RAO, RFI, and None (no param randomization)
     rand_split_ratio: float = 0.5
     """the ratio at which to split the population for ERFI mode, if 0.9 the first 90% of the population uses RFI and the last 10% uses RAO"""
-    start_rand_noise: float = 0.0
+    start_rand_noise: float = 0.05
     """the initial randomization scale for the environment parameters sampling"""
     final_rand_noise: float = 0.05
     """the final randomization scale for the environment parameters sampling"""            
