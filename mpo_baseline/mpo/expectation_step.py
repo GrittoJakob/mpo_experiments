@@ -4,9 +4,9 @@ import torch
 def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False):
     """
     E-step of MPO:
-    - Sample actions from the target policy for each state.
     - Evaluate Q-values with the target critic.
     - Update the temperature parameter eta via the dual function.
+    - Compute weight action penalties via the temperature loss function
     - Compute normalized weights over actions (norm_target_q).
     """
     diff_out_of_bound = None
@@ -16,7 +16,7 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
     if self.use_action_penalty and self.eta_penalty.grad is not None:
         self.eta_penalty.grad = None
 
-    # Dual function returns a scalar that we differentiate w.r.t. eta
+    # Dual function returns a scalar that we differentiate w.r.t. eta and our normalized values
     norm_target_q, loss_temperature = self.compute_weights_temperature_loss(self.eta_dual, target_q, self.eps_dual)
     loss_dual = loss_temperature
 
@@ -90,18 +90,18 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
 def compute_weights_temperature_loss(self, temperature: torch.Tensor, values: torch.Tensor, epsilon: float):
     """
     temperature: torch scalar, requires_grad=True
-    values: (N, B)  (keine Gradienten; typischerweise aus target critic, detached)
+    values: (N, B)  (No Gradients)
     epsilon: float
     returns:
     weights: (N, B) detached
-    dual_loss: scalar tensor (hat Grad wrt temperature)
+    dual_loss: scalar tensor (has Grad wrt temperature)
     """
     values = values.detach()  # stop grad for 
 
     # weights (stop grad wrt temperature) 
     tempered = values / temperature.detach()
     tempered = tempered - tempered.max(dim=0, keepdim=True).values  # stable
-    weights = torch.softmax(tempered, dim=0).detach()  # detach == stop-gradient
+    weights = torch.softmax(tempered, dim=0).detach()
 
     # dual loss (Grad wrt temperature) 
     values_T = values.transpose(0, 1)  # (B, N)

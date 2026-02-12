@@ -3,6 +3,7 @@ import time
 import os
 import math
 from tqdm import tqdm
+from dataclasses import dataclass
 import numpy as np
 import gymnasium as gym
 import torch
@@ -61,12 +62,22 @@ def train_loop(
     )
 
 
-    max_training_steps = args.max_training_steps
     num_steps = 0
     it = 1
     grad_updates = 0
-    runtime_rollout = 0.0
-    runtime_E_step = 0.0
+    @dataclass
+    class Runtime: 
+        rollout: float = 0.0
+        E_step: float = 0.0
+        M_step: float = 0.0
+        Critic_update: float = 0.0
+        Eval: float = 0.0
+        Sample_from_buffer: float = 0.0
+        Sample_actions: float = 0.0
+        target_critic_forward: float = 0.0
+        
+    
+  
     runtime_M_step = 0.0
     runtime_policy_eval = 0.0
     runtime_eval = 0.0
@@ -75,7 +86,7 @@ def train_loop(
     runtime_t_critic_forward = 0.0
     best_video_reward = 0.0
 
-    print(f"[DEBUG] start with number of steps = {len(replaybuffer)}, maximal number of environment steps: {max_training_steps}")       
+    print(f"[DEBUG] start with number of steps = {len(replaybuffer)}, maximal number of environment steps: {args.max_training_steps}")       
 
     
     # Warm-up: fill replay buffer with some initial experience
@@ -85,10 +96,10 @@ def train_loop(
 
     
     # Main training iterations
-    pbar = tqdm(total=max_training_steps, desc="Env steps")
+    pbar = tqdm(total=args.max_training_steps, desc="Env steps")
  
 
-    while num_steps < max_training_steps:
+    while num_steps < args.max_training_steps:
 
         # Collect fresh experience for this iteration
         t_env_start = time.perf_counter()
@@ -117,7 +128,7 @@ def train_loop(
 
         # Logging runtime env end
         t_env_end = time.perf_counter()
-        runtime_rollout += t_env_end - t_env_start
+        Runtime.rollout += t_env_end - t_env_start
 
         num_updates_per_iter = math.ceil(
         args.UTD_ratio * new_steps
@@ -144,7 +155,7 @@ def train_loop(
                 assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch,
                         args.batch_size, mpo.state_dim, mpo.action_dim)
             sample_mbatch_end = time.time()
-            runtime_sample_minibatch += sample_mbatch_end - sample_mbatch_start
+            Runtime.Sample_from_buffer += sample_mbatch_end - sample_mbatch_start
 
             # Compute target_actor forward pass to get sampled_actions an b_mu, b_st
             # all_sampled_actions: sampled actions for timestep t and t+1 concatenated
@@ -156,7 +167,7 @@ def train_loop(
                 sample_num= args.sample_action_num
             )
             sample_action_end = time.time()
-            runtime_sample_actions += sample_action_end - sample_action_start
+            Runtime.Sample_actions += sample_action_end - sample_action_start
 
             # Compute forward pass of target critic for state_batch and next_state_batch
             t_critic_forward_start = time.time()
@@ -166,7 +177,7 @@ def train_loop(
                 all_sampled_actions = all_sampled_actions
             )
             t_critic_forward_end = time.time()
-            runtime_t_critic_forward += t_critic_forward_end - t_critic_forward_start
+            Runtime.target_critic_forward += t_critic_forward_end - t_critic_forward_start
 
             # Policy evaluation (critic update)
             t_policy_eval_start = time.perf_counter()
@@ -182,7 +193,7 @@ def train_loop(
                 )
 
             t_policy_eval_end = time.perf_counter()    
-            runtime_policy_eval += t_policy_eval_end - t_policy_eval_start
+            Runtime.Critic_update += t_policy_eval_end - t_policy_eval_start
 
 
             if i_update % args.delay_policy_update == 0:
@@ -196,7 +207,7 @@ def train_loop(
                     )
                 
                 t_E_step_end = time.perf_counter()         
-                runtime_E_step += t_E_step_end - t_E_step_start
+                Runtime.E_Step += t_E_step_end - t_E_step_start
 
                 # M-step (actor / policy update)
                 t_M_step_start = time.perf_counter()
@@ -208,26 +219,16 @@ def train_loop(
                     std_off = std_off,
                     collect_stats= collect_stats)
                 t_M_step_end = time.perf_counter()
-                runtime_M_step += t_M_step_end - t_M_step_start
+                Runtime.M_step += t_M_step_end - t_M_step_start
 
 
             # logging 
             if args.wandb_track and i_update % args.log_period == 0:
-                runtime = {
-                    "rollout_time_sec": runtime_rollout,
-                    "E-Step": runtime_E_step,
-                    "M-Step": runtime_M_step,
-                    "critic_update": runtime_policy_eval,
-                    "evaluation": runtime_eval,
-                    "sample_from_buffer": runtime_sample_minibatch,
-                    "t_critic_foward_pass": runtime_t_critic_forward,
-                    "sample_actions": runtime_sample_actions,
-                }
                 logging_wandb(
                     writer = writer,
                     args = args,
                     replaybuffer = replaybuffer,
-                    runtime = runtime, 
+                    runtime = Runtime, 
                     stats_m_step = stats_m_step,
                     stats_e_step = stats_e_step,
                     critic_update_stats = critic_update_stats,
@@ -252,7 +253,7 @@ def train_loop(
             evaluate(args, mpo.actor, eval_env, writer, device, num_steps)
             mpo.actor.train()
             t_eval_end = time.perf_counter()
-            runtime_eval += t_eval_end -t_eval_start 
+            Runtime.Eval += t_eval_end -t_eval_start 
 
         # if it % args.save_every == 0:
         #     mpo.save(it)

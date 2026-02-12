@@ -2,7 +2,7 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 from torch.distributions import MultivariateNormal, Independent, Normal
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-from helpers.utils import gaussian_kl, gaussian_kl_diag
+from helpers.Gaussian_KL_div import gaussian_kl, gaussian_kl_diag
 
 def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off, std_off, collect_stats): 
     """
@@ -24,7 +24,7 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     weighted_logp = (norm_target_q * (logp1 + logp2)) 
     self.loss_p = - weighted_logp.sum(dim=0).mean()        # sum over N -> (B,), mean over B -> scalar
 
-    # KL constraints between old and new Gaussian policies
+    # KL constraints between old and new Gaussian policies, options to use KL mass forcing KL divergence or zero forcing
     C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(mu_off, mu_on, std_off, std_on, self.use_mass_force_KL)
 
     with torch.no_grad():

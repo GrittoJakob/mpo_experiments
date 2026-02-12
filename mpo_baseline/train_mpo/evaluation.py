@@ -65,6 +65,11 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                     # Tag
                     tag = f"eval/return_goal_x{gx:.1f}_y{gy:.1f}".replace("-", "m").replace(".", "p")
                     writer.add_scalar(tag, total_reward, global_step)
+                elif args.task_mode == "inverted_multi_task":
+                    sign = task_options["task_mode"]
+                    # Tag:
+                    tag = f"eval/return_direction_{sign:.1f}"
+                
 
                 # 3. Logging (Now robust and wrapper-independent)
 

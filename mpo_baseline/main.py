@@ -12,7 +12,7 @@ import wandb
 from nets.actor import Actor
 from nets.critic import Critic
 from typing import Optional
-from helpers.env_creator import limit_threads, make_train_env, make_eval_env, make_train_vec_env
+from environment.env_creator import limit_threads, make_train_env, make_eval_env, make_train_vec_env
 from buffer.replaybuffer import ReplayBuffer
 from buffer.replaybuffer_gpu import ReplayBufferGPU
 from train_args import Args

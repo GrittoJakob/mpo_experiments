@@ -1,34 +1,23 @@
 import wandb
 from torch.utils.tensorboard import SummaryWriter
 
-def logging_wandb(writer,args, replaybuffer, runtime,  stats_m_step, stats_e_step, critic_update_stats, grad_updates, num_steps):
+def logging_wandb(writer,args, replaybuffer, Runtime,  stats_m_step, stats_e_step, critic_update_stats, grad_updates, num_steps):
     
     
     # Compute mean reward/return in replay buffer
     mean_reward_buffer = replaybuffer.mean_reward()
     mean_return_buffer = replaybuffer.mean_return() 
-    mean_episode_len = mean_return_buffer/(mean_reward_buffer+ 1e-8)  
-
-    # Runtimes
-    runtime_rollout            = runtime["rollout_time_sec"]
-    runtime_E_step             = runtime["E-Step"]
-    runtime_M_step             = runtime["M-Step"]
-    runtime_policy_eval        = runtime["critic_update"]
-    runtime_eval               = runtime["evaluation"]
-    runtime_sample_minibatch   = runtime["sample_from_buffer"]
-    runtime_t_critic_forward   = runtime["t_critic_foward_pass"]
-    runtime_sample_actions     = runtime["sample_actions"]
-                
+    mean_episode_len = mean_return_buffer/(mean_reward_buffer+ 1e-8)                  
     
     # Timing
-    writer.add_scalar("time/rollout_time_sec", runtime_rollout, grad_updates)
-    writer.add_scalar("time/E-Step", runtime_E_step, grad_updates)
-    writer.add_scalar("time/M-Step", runtime_M_step, grad_updates)
-    writer.add_scalar("time/critic_update", runtime_policy_eval, grad_updates)
-    writer.add_scalar("time/evaluation", runtime_eval, grad_updates)
-    writer.add_scalar("time/sample_from_buffer", runtime_sample_minibatch, grad_updates)
-    writer.add_scalar("time/t_critic_foward_pass", runtime_t_critic_forward, grad_updates)
-    writer.add_scalar("time/sample_actions", runtime_sample_actions, grad_updates)
+    writer.add_scalar("time/rollout_time_sec", Runtime.rollout, grad_updates)
+    writer.add_scalar("time/E-Step", Runtime.E_step, grad_updates)
+    writer.add_scalar("time/M-Step",Runtime.M_step, grad_updates)
+    writer.add_scalar("time/critic_update", Runtime.Critic_update, grad_updates)
+    writer.add_scalar("time/evaluation", Runtime.Eval, grad_updates)
+    writer.add_scalar("time/sample_from_buffer", Runtime.Sample_from_buffer, grad_updates)
+    writer.add_scalar("time/t_critic_foward_pass", Runtime.target_critic_forward, grad_updates)
+    writer.add_scalar("time/sample_actions", Runtime.Sample_actions, grad_updates)
 
     #  Buffer
     writer.add_scalar("buffer/size", len(replaybuffer) ,grad_updates)

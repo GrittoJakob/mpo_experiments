@@ -31,7 +31,7 @@ def target_critic_forward_pass(
 
         with torch.no_grad():
             all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
-            expanded_all_states = all_states.unsqueeze(0).expand(N, -1, -1)                  # (N, 2B, obs)  
+            expanded_all_states = all_states.unsqueeze(0).expand(N, -1, -1) # (N, 2B, obs)  
 
             all_target_q = self.target_critic.forward(
                 expanded_all_states.reshape(-1, self.state_dim),    # (N* 2B, action_dim)

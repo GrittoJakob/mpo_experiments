@@ -1,6 +1,10 @@
 import torch
 
 def critic_update_td(self, next_target_q,  state_batch, action_batch, reward_batch, terminated_batch, truncated_batch, collect_stats):
+    
+    # TD Learning algorithm:
+    # Delta_Q = Q_t - (reward + gamma * Q_t+1)
+    
     B = state_batch.size(0)
     reward_batch = reward_batch.view(-1)
     terminated_batch = terminated_batch.view(-1)
