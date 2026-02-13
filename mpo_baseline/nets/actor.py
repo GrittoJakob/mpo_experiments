@@ -67,12 +67,6 @@ class Actor(nn.Module):
         else:
             std = self.log_std
 
-        #Debug: Print variance
-        if not self._printed_init_cov:
-            with torch.no_grad():
-                print("🔍 Initial diagonal variances:", std.cpu().numpy())
-            self._printed_init_cov = True
-
         return mean, std
    
      
@@ -127,6 +121,7 @@ class Actor(nn.Module):
             mean, std = self.forward(state_batched)
             dist = Independent(Normal(mean,std), 1)
             samples = dist.rsample((sample_num,)).permute(1, 0, 2)
+            
         return samples, mean, std
 
 

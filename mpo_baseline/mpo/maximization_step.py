@@ -15,14 +15,17 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     # Current actor parameters for this batch of states
     mu_on, std_on = self.actor.forward(state_batch)      
 
-    pi_1 = Independent(Normal(mu_on, std_off), 1)
-    pi_2 = Independent(Normal(mu_off, std_on), 1)
-    logp1 = pi_1.log_prob(sampled_actions)
-    logp2 = pi_2.log_prob(sampled_actions)
+    logp1 = logp_diag_normal(sampled_actions, mu_on, std_off, include_log_std=False)
+    logp2 = logp_diag_normal(sampled_actions, mu_off, std_on, include_log_std=True)
+    # pi_1 = Independent(Normal(mu_on, std_off), 1)
+    # pi_2 = Independent(Normal(mu_off, std_on), 1)
+    # logp1 = pi_1.log_prob(sampled_actions)
+    # logp2 = pi_2.log_prob(sampled_actions)
 
     # Weighted policy improvement objective
     weighted_logp = (norm_target_q * (logp1 + logp2)) 
-    self.loss_p = - weighted_logp.sum(dim=0).mean()        # sum over N -> (B,), mean over B -> scalar
+    B = state_batch.shape[0]
+    self.loss_p = -(weighted_logp).sum() / B       # sum over N -> (B,), mean over B -> scalar
 
     # KL constraints between old and new Gaussian policies, options to use KL mass forcing KL divergence or zero forcing
     C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(mu_off, mu_on, std_off, std_on, self.use_mass_force_KL)
@@ -95,3 +98,23 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
         stats = None
 
     return stats
+
+    
+def logp_diag_normal(actions, mean, std, include_log_std: bool):
+    """
+    actions: [N, B, A]
+    mean/std: [B, A]  (broadcast über N)
+    returns: [N, B]
+    """
+    # numerical stability
+    std = std.clamp_min(1e-8)
+
+    inv_std = std.reciprocal()                 # [B, A]
+    z = (actions - mean) * inv_std             # broadcast -> [N, B, A]
+    log_prob = -0.5 * (z * z).sum(dim=-1)            # [N, B]
+
+    if include_log_std:
+        log_prob = log_prob - std.log().sum(dim=-1)        # [B] broadcast -> [N, B]
+
+    # Konstante -0.5*A*log(2pi) weggelassen (ändert Gradienten nicht)
+    return log_prob

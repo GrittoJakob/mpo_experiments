@@ -56,8 +56,26 @@ class Multi_Task_InvertedWrapper(gym.Wrapper):
         else:
             is_backward = np.random.random() < self.backward_prob
             self.invert = -1.0 if is_backward else 1.0
+      
 
         obs, info = self.env.reset(seed=seed, options=options)
+        unwrapped_env = self.env.unwrapped
+        spawn_yaw = unwrapped_env.np_random.uniform(-np.pi, np.pi)
+
+        qpos = unwrapped_env.data.qpos.copy()
+        qvel = unwrapped_env.data.qvel.copy()
+
+        # Quaternion für Rotation um z (Yaw): (w,x,y,z) = (cos(y/2), 0, 0, sin(y/2))
+        root_quaternion = np.array(
+            [np.cos(spawn_yaw / 2.0), 0.0, 0.0, np.sin(spawn_yaw / 2.0)],
+            dtype=np.float64
+        )
+
+        # root free joint: qpos[0:3]=pos, qpos[3:7]=quat
+        qpos[3:7] = root_quaternion
+
+        unwrapped_env.set_state(qpos, qvel)
+        obs = unwrapped_env._get_obs()  
 
         # 🟢 History initialisieren: valid=0
         self._hist_rewards.clear()

@@ -4,7 +4,8 @@ import os
 import gymnasium as gym
 from .task_wrapper import InvertedVelocityWrapper, GoalPositionWrapper
 from .multi_task_wrapper import Multi_Task_InvertedWrapper
-from .ERFI_Wrappers import RFIActionWrapper
+from .ERFI_Wrappers import RAOActionWrapper, RFIActionWrapper, ERFIEvalActionWrapper
+
 
 def limit_threads(n: int):
     # PyTorch threads
@@ -17,30 +18,45 @@ def limit_threads(n: int):
     os.environ["MKL_NUM_THREADS"] = str(n)
     os.environ["NUMEXPR_NUM_THREADS"] = str(n)
 
-def maybe_wrap_task(env, args):
+def maybe_wrap_task(env, args, *, rank: Optional[int] = None, split_idx: Optional[int] = None, eval_env: Optional[bool]= False):
+    # --- task wrappers ---
+    
     if getattr(args, "task_mode", "default") == "inverted":
         env = InvertedVelocityWrapper(env, args)
-    if getattr(args, "task_mode", "default") == "target_goal":
+    elif getattr(args, "task_mode", "default") == "target_goal":
         env = GoalPositionWrapper(env, args)
-    if getattr(args, "task_mode", "default") == "inverted_multi_task":
+    elif getattr(args, "task_mode", "default") == "inverted_multi_task":
         env = Multi_Task_InvertedWrapper(env, args, args.history_len, args.append_task_reward)
-    if args.rand_mode == "RFI":
-        # Apply RFI to ALL environments
+
+    # --- randomization wrappers ---
+    random_mode = getattr(args, "rand_mode", None)
+
+    if random_mode == "RFI":
         print("RFI is activated")
         env = RFIActionWrapper(env, args.final_rand_noise)
-    # elif args.rand_mode == "RAO":
-    #     # Apply RAO to ALL environments
-    #     env = mw.RAOActionWrapper(env, args.noise_limit)
 
-    # elif args.rand_mode == "ERFI":
-    #     # Split the population based on rank and ratio
-    #     if rank < split_idx:
-    #         env = mw.RFIActionWrapper(env, args.noise_limit)
-    #     else:
-    #         env = mw.RAOActionWrapper(env, args.noise_limit)
+    elif random_mode == "RAO":
+        print("RAO is activated")
+        env = RAOActionWrapper(env, args.noise_limit)
+
+    elif random_mode == "ERFI" and not eval_env:
+        if rank is None or split_idx is None:
+            raise ValueError("ERFI requires rank and split_idx")
+
+        if rank < split_idx:
+            env = RFIActionWrapper(env, args.noise_limit)
+        else:
+            env = RAOActionWrapper(env, args.noise_limit)
+
+    elif eval_env and random_mode == "ERFI":
+        env = ERFIEvalActionWrapper(
+            env,
+            rfi_noise=getattr(args, "noise_limit", 0.05),
+            rao_noise=getattr(args, "noise_limit", 0.05),
+            rng_seed=int(getattr(args, "seed", 0)) + 12345,
+        )
 
     return env
-
 
 def _make_base_env(env_id: str, args, render_mode: Optional[str] = None):
     """Central Builder, for equality"""
@@ -62,11 +78,10 @@ def _make_base_env(env_id: str, args, render_mode: Optional[str] = None):
             env = gym.make(env_id, render_mode=render_mode)
     return env
 
-
-def make_train_env(args, env_id, seed):
+def make_train_env(args, env_id, seed, *, rank: Optional[int] = None, split_idx: Optional[int] = None):
     env = _make_base_env(env_id, args, render_mode=None)
 
-    env = maybe_wrap_task(env, args)
+    env = maybe_wrap_task(env, args, rank=rank, split_idx=split_idx)
 
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
@@ -90,7 +105,7 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
     else:
         env = _make_base_env(env_id, args, render_mode=None)
 
-    env = maybe_wrap_task(env, args)
+    env = maybe_wrap_task(env, args, eval_env = True)
 
     env.action_space.seed(seed_offset)
     env.observation_space.seed(seed_offset)
@@ -103,15 +118,13 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
 def make_video_env(args, run_name, name_prefix: str):
     return make_eval_env(args, args.env_id, args.seed, True, run_name, name_prefix)
 
-def _train_env_thunk(args, env_id: str, base_seed: int, rank: int, threads_per_worker: int):
-    
+def _train_env_thunk(args, env_id: str, base_seed: int, rank: int, threads_per_worker: Optional[int], split_idx: Optional[int]):
     def _thunk():
-        # In Subprozessen Thread-Anzahl klein halten, sonst wird's langsamer
         # if threads_per_worker is not None:
         #     limit_threads(int(threads_per_worker))
 
         seed = int(base_seed) + int(rank)
-        return make_train_env(args, env_id, seed)
+        return make_train_env(args, env_id, seed, rank=rank, split_idx=split_idx)
     return _thunk
 
 
@@ -127,12 +140,20 @@ def make_train_vec_env(
     assert num_envs >= 1
 
     apply_thread_limits = (asynchronous and num_envs > 1)
+    
+    split_idx = None
+    if getattr(args, "rand_mode", None) == "ERFI":
+        ratio = float(getattr(args, "rand_split_ratio", 0.5))  # z.B. 0.8
+        ratio = max(0.0, min(1.0, ratio))
+        split_idx = int(round(num_envs * ratio))  # z.B. 10 envs, 0.8 -> 8
+
 
     env_fns = [
         _train_env_thunk(
             args, env_id, seed,
             rank=i,
-            threads_per_worker=(threads_per_worker if apply_thread_limits else None)
+            threads_per_worker=(threads_per_worker if apply_thread_limits else None),
+            split_idx=split_idx,
         )
         for i in range(num_envs)
     ]

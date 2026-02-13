@@ -21,9 +21,13 @@ def sample_actions_from_target_actor(self, state_batch, next_state_batch = None,
 
             # get distribution
             all_sampled_actions, mu_off, std_off = self.target_actor.sample_action(all_states, sample_num) # (2B,)
-            all_sampled_actions  = all_sampled_actions.permute( 1, 0, 2).contiguous()    #(sample_num, 2B, action_dim)
-            sampled_actions      = all_sampled_actions[:, :B]  #(sample_num, B, action_dim)
-            return  all_sampled_actions, sampled_actions, mu_off[:B], std_off[:B]
+            mu_off  = mu_off.clone()
+            std_off = std_off.clone()   
+
+            all_sampled_actions  = all_sampled_actions.permute(1, 0, 2).contiguous()   # (N, 2B, A)
+            sampled_actions = all_sampled_actions[:, :B].contiguous()                  # (N, B, A)
+            return all_sampled_actions, sampled_actions, mu_off[:B].contiguous(), std_off[:B].contiguous()
+       
         else:
             sampled_actions, b_mu, b_std = self.target_actor.sample_action(state_batch, sample_num)
             sampled_actions = sampled_actions.permute(1,0,2)

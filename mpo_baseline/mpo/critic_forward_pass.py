@@ -37,8 +37,7 @@ def target_critic_forward_pass(
                 expanded_all_states.reshape(-1, self.state_dim),    # (N* 2B, action_dim)
                 all_sampled_actions.reshape(-1, self.action_dim)    # (N * 2B, action_dim)
             ).reshape(N, 2*B)  # (sample_num, 2B)
-
-            target_q = all_target_q[:,:B]
-            next_target_q = all_target_q[:,B:]
-
+        
+        target_q      = all_target_q[:, :B].contiguous()
+        next_target_q = all_target_q[:, B:].contiguous()
         return target_q, next_target_q

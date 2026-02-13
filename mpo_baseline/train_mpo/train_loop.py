@@ -95,7 +95,8 @@ def train_loop(
  
 
     while num_steps < args.max_training_steps:
-
+        if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
+                torch.compiler.cudagraph_mark_step_begin()
         # Collect fresh experience for this iteration
         t_env_start = time.perf_counter()
         new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device, gpu_buffer)
@@ -132,6 +133,7 @@ def train_loop(
 
         # Perform several updates per iteration (UTD ratio)
         for i_update in range(num_updates_per_iter):
+            
             grad_updates += 1
             
             buffer_size= len(replaybuffer)

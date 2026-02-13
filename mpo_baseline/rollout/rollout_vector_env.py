@@ -17,20 +17,20 @@ def _info_vec(info, key: str, num_envs: int, default: float = 0.0) -> np.ndarray
 
 
 
-
 def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replaybuffer, device, buffer_gpu):
     """
-    Collect exactly ONE episode per env, store it, then stop when ALL envs have finished (done once).
-    Done envs may be reset to allow stepping remaining envs, but are no longer recorded.
+    Collect at least `min_steps_per_env` transitions PER env (can span multiple episodes),
+    but never cut episodes early. Once an env reaches the min, keep recording until that
+    env's current episode ends (done), then stop recording it. Stop when all envs stopped.
     """
     num_envs = int(env.num_envs)
-    print("Num envs:", num_envs)
+    min_steps_per_env = int(getattr(args, "min_steps_per_env", 1000))  # default 1000 if not in args
 
     episodes_cpu = []
     total_steps_collected = 0
     actor.eval()
 
-    # per-env episode buffers
+    # per-env episode buffers (current episode only)
     states      = [[] for _ in range(num_envs)]
     actions     = [[] for _ in range(num_envs)]
     next_states = [[] for _ in range(num_envs)]
@@ -42,8 +42,14 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
     pos_rew     = [[] for _ in range(num_envs)]
     progress    = [[] for _ in range(num_envs)]
 
-    # record exactly the first episode per env
+    # total recorded steps per env across episodes
+    steps_per_env = np.zeros((num_envs,), dtype=np.int32)
+
+    # envs we still record
     recording = np.ones((num_envs,), dtype=bool)
+
+    # envs that already reached min; we will stop recording them once they hit done next time
+    finish_on_done = np.zeros((num_envs,), dtype=bool)
 
     obs, info = env.reset()
 
@@ -52,9 +58,6 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
             obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
 
             action = np.asarray(actor.action(obs_t), dtype=np.float32)
-            # optional sanity check:
-            # assert action.ndim == 2 and action.shape[0] == num_envs, (action.shape, num_envs)
-
             if args.use_action_clipping:
                 action = np.clip(action, args.action_space_low, args.action_space_high)
 
@@ -65,6 +68,7 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
             truncated  = np.asarray(truncated, dtype=bool)
             done       = terminated | truncated
 
+            # terminal next_obs handling for autoreset
             next_obs_store = np.asarray(next_obs).copy()
             next_obs_store = _apply_final_observation(next_obs_store, info, done)
 
@@ -82,18 +86,14 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
             else:
                 v_rew = p_rew = prog = t_inv = np.zeros((num_envs,), dtype=np.float32)
 
-            # store transitions ONLY for envs still recording their first episode
+            # store transitions ONLY for envs still recording
             for i in range(num_envs):
                 if not recording[i]:
                     continue
 
-                obs_i      = np.asarray(obs[i], dtype=np.float32).reshape(-1)
-                act_i      = np.asarray(action[i], dtype=np.float32).reshape(-1)
-                next_obs_i = np.asarray(next_obs_store[i], dtype=np.float32).reshape(-1)
-
-                states[i].append(obs_i)
-                actions[i].append(act_i)
-                next_states[i].append(next_obs_i)
+                states[i].append(np.asarray(obs[i], dtype=np.float32).reshape(-1))
+                actions[i].append(np.asarray(action[i], dtype=np.float32).reshape(-1))
+                next_states[i].append(np.asarray(next_obs_store[i], dtype=np.float32).reshape(-1))
 
                 rews[i].append(float(reward[i]))
                 terms[i].append(bool(terminated[i]))
@@ -104,12 +104,19 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
                 pos_rew[i].append(float(p_rew[i]))
                 progress[i].append(float(prog[i]))
 
+                steps_per_env[i] += 1
+
+                # once we hit min, mark that we should stop after the next done (end of current episode)
+                if (not finish_on_done[i]) and (steps_per_env[i] >= min_steps_per_env):
+                    finish_on_done[i] = True
+
             total_steps_collected += int(recording.sum())
 
             # flush episodes that ended this step (only those still recording)
             flush = done & recording
             if flush.any():
                 for i in np.where(flush)[0]:
+                    # store the finished episode
                     if len(states[i]) > 0:
                         if buffer_gpu:
                             replaybuffer.store_episode_stacked(
@@ -130,14 +137,17 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
                                 terms[i], truncs[i], task_inv[i], vel_rew[i], pos_rew[i], progress[i]
                             )))
 
-                    # clear buffers and stop recording this env forever
+                    # clear episode buffers (ready for next episode if we keep recording)
                     states[i].clear(); actions[i].clear(); next_states[i].clear()
                     rews[i].clear(); terms[i].clear(); truncs[i].clear()
                     task_inv[i].clear(); vel_rew[i].clear(); pos_rew[i].clear(); progress[i].clear()
 
-                    recording[i] = False
+                    # if this env already reached min, stop recording it after this done
+                    if finish_on_done[i]:
+                        recording[i] = False
+                        # otherwise: keep recording future episodes until min is reached
 
-            # if env does NOT autoreset, we must reset done envs so we can keep stepping others
+            # handle reset if not autoreset (must reset any done envs so stepping can continue)
             autoreset = isinstance(info, dict) and ("final_observation" in info)
             if (not autoreset) and done.any():
                 reset_obs, _ = env.reset(options={"reset_mask": done})
@@ -151,6 +161,7 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
         replaybuffer.store_episodes(episodes_cpu)
 
     return total_steps_collected
+
 
 
 def _apply_final_observation(next_obs: np.ndarray, info: dict, done: np.ndarray) -> np.ndarray:

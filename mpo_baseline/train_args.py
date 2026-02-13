@@ -23,7 +23,7 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "fsandco"
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 250
     "number of global updates per log to wandb"
@@ -109,7 +109,7 @@ class Args:
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
-    sample_steps_per_iter: int = 1000
+    min_steps_per_env: int = 1000
     """number of env steps to sample per iteration"""
     sample_episode_maxstep: int = 1000
     """maximum number of steps per sampled episode"""
@@ -124,7 +124,7 @@ class Args:
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 10 
+    evaluate_period: int = 5
     """evaluate the agent every N iterations"""
     evaluate_episode_num: int = 4
     """how many evaluation episodes to run"""
@@ -145,15 +145,13 @@ class Args:
     """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
     save_replay_buffer: bool = True
     """whether to include replay buffer in checkpoints (large files!)"""
-    video_max_steps: int = 400
-    """number of steps to go in video rollout"""
 
     # ===============================
     # warm up compilation
     # ===============================
-    use_compile: bool = False
+    use_compile: bool = True
     """torch.compilation flag"""
-    compile_mode: str=  "default"
+    compile_mode: str=  "reduce-overhead"
     """compile mode for torch compilation"""
 
     # ===============================
@@ -161,7 +159,7 @@ class Args:
     # ===============================
     ctrl_cost_weight: float = 0.5
     """ Weight for ctrl_cost term, default = 0.5"""
-    healthy_reward_weight: float = 0.8
+    healthy_reward_weight: float = 1.2
     """Weight for healthy_reward term, default = 1.2, 0.8 for multi task"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""
@@ -174,7 +172,7 @@ class Args:
     # ===============================
 
     ## in train_args.py 
-    task_mode: str = "inverted_multi_task" 
+    task_mode: str = "default" 
     """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
     velocity_reward_scale: float = 1.7
     """scale parameter for reward flipped velocity"""
@@ -193,12 +191,12 @@ class Args:
     """flag for exlude/include central force terms in observations"""
 
     
-    rand_mode: str = "default"
+    rand_mode: str = "ERFI"
     """the environment parametrization type for meta-learning""" # Currently supports ERFI, RAO, RFI, and None (no param randomization)
     rand_split_ratio: float = 0.5
     """the ratio at which to split the population for ERFI mode, if 0.9 the first 90% of the population uses RFI and the last 10% uses RAO"""
-    start_rand_noise: float = 0.05
-    """the initial randomization scale for the environment parameters sampling"""
-    final_rand_noise: float = 0.05
-    """the final randomization scale for the environment parameters sampling"""            
+    noise_limit: float = 0.05
+    """noise limit for RFI and RAO"""
+
+           
 
