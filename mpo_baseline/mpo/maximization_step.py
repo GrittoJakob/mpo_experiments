@@ -2,7 +2,7 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 from torch.distributions import MultivariateNormal, Independent, Normal
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-from helpers.Gaussian_KL_div import gaussian_kl, gaussian_kl_diag
+from helpers.Gaussian_KL_div import gaussian_kl_diag
 
 def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off, std_off, collect_stats): 
     """

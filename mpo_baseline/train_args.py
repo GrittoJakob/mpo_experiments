@@ -23,7 +23,7 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "fsandco"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 250
     "number of global updates per log to wandb"
@@ -35,8 +35,8 @@ class Args:
     """iterations per logging exactly one episode video"""
     buffer_on_cuda: bool = True
     """store replay_buffer on cuda"""
-    num_envs: int = 1
-    asynchronous: bool = False
+    num_envs: int = 4
+    asynchronous: bool = True
     
 
     # ===============================
@@ -151,7 +151,7 @@ class Args:
     # ===============================
     # warm up compilation
     # ===============================
-    use_compile: bool = True
+    use_compile: bool = False
     """torch.compilation flag"""
     compile_mode: str=  "default"
     """compile mode for torch compilation"""

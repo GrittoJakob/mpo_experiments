@@ -5,6 +5,7 @@ import gymnasium as gym
 from .task_wrapper import InvertedVelocityWrapper, GoalPositionWrapper
 from .multi_task_wrapper import Multi_Task_InvertedWrapper
 from .ERFI_Wrappers import RFIActionWrapper
+
 def limit_threads(n: int):
     # PyTorch threads
     torch.set_num_threads(n)
@@ -106,8 +107,8 @@ def _train_env_thunk(args, env_id: str, base_seed: int, rank: int, threads_per_w
     
     def _thunk():
         # In Subprozessen Thread-Anzahl klein halten, sonst wird's langsamer
-        if threads_per_worker is not None:
-            limit_threads(int(threads_per_worker))
+        # if threads_per_worker is not None:
+        #     limit_threads(int(threads_per_worker))
 
         seed = int(base_seed) + int(rank)
         return make_train_env(args, env_id, seed)

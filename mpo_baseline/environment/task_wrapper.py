@@ -11,10 +11,10 @@ class InvertedVelocityWrapper(gym.Wrapper):
         self.scale_wrong_direction = args.scale_wrong_direction_reward
         
         
-        # 🟢 NEW: Curriculum Speed Limit
+        # NEW: Curriculum Speed Limit
         self.current_max_speed = float('inf') 
 
-        # 🟢 CRITICAL FIX FOR HALF-CHEETAH / ANT:
+        # CRITICAL FIX FOR HALF-CHEETAH / ANT:
         # We must expand the observation space by 1 to hold the "Task Hint"
         # (The +1.0 or -1.0 value that tells the agent which way to go initially)
         low = np.append(env.observation_space.low, -float('inf'))
@@ -40,7 +40,7 @@ class InvertedVelocityWrapper(gym.Wrapper):
             
         obs, info = self.env.reset(seed=seed, options=options)
         
-        # 🟢 Inject Hint
+        # Inject Hint
         obs = self._add_hint(obs)
         
         # Add telemetry
@@ -50,7 +50,7 @@ class InvertedVelocityWrapper(gym.Wrapper):
     def step(self, action):
         obs, rewards, terminated, truncated, info = self.env.step(action)
         
-        # 🟢 Inject Hint
+        # Inject Hint
         obs = self._add_hint(obs)        
         assert ("reward_forward" in info) or ("forward_reward" in info), info.keys()
 

@@ -1,4 +1,4 @@
-from helpers.env_creator import make_video_env
+from environment.env_creator import make_video_env
 import torch
 import os
 import glob

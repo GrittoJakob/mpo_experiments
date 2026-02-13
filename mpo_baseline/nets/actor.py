@@ -82,19 +82,22 @@ class Actor(nn.Module):
         :return: an action
         """
         with torch.no_grad():
+            is_batched = (state.ndim == 2)
             state_batched = self.ensure_batched(state)
             mean, std = self.forward(state_batched)
             action_distribution = Independent(Normal(mean, std), 1)
 
             if deterministic:
-                action = mean[0]
+                action = mean
             else:
-                action = action_distribution.sample()[0]
+                action = action_distribution.sample()
 
             if clip_to_env:
                 low = torch.as_tensor(self.env.action_space.low, device=action.device, dtype=action.dtype)
                 high = torch.as_tensor(self.env.action_space.high, device=action.device, dtype=action.dtype)
                 action = torch.clamp(action, low, high)
+            if not is_batched:
+                action = action.squeeze(0)              # (da,)
 
         return action.cpu().numpy()
 

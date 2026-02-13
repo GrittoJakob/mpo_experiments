@@ -1,4 +1,12 @@
 import os
+os.environ["OMP_NUM_THREADS"] = str(4)
+os.environ["OPENBLAS_NUM_THREADS"] = str(4)
+os.environ["MKL_NUM_THREADS"] = str(4)
+os.environ["NUMEXPR_NUM_THREADS"] = str(4)
+os.environ["MAX_JOBS"] = "16" #for torch compile
+os.environ["TORCH_LOGS"] = "+recompiles, +graph_breaks"
+os.environ["TORCH_COMPILE_DEBUG"] = "1"
+
 import time
 import random
 from dataclasses import dataclass
@@ -21,12 +29,6 @@ from helpers.warm_up_compilation import warmup_mpo_compile
 
 from mpo.__init__ import MPO
 
-def init_runname(args):
-     # Run-Name à la CleanRL
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    return run_name
-
-
 def make_envs(args, run_name):
     if args.num_envs > 1:
         train_env = make_train_vec_env(
@@ -41,9 +43,18 @@ def make_envs(args, run_name):
         train_env = make_train_env(args, args.env_id, args.seed)
     
     eval_env = make_eval_env(args, args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
-    args.obs_space = train_env.observation_space.shape[0]
-    args.action_dim = train_env.action_space.shape[0]
+    if isinstance(train_env, gym.vector.VectorEnv):
+        args.obs_space   = int(np.prod(train_env.single_observation_space.shape))
+        args.action_dim  = int(np.prod(train_env.single_action_space.shape))
+    else:
+        args.obs_space   = int(np.prod(train_env.observation_space.shape))
+        args.action_dim  = int(np.prod(train_env.action_space.shape))
     return train_env, eval_env
+
+def init_runname(args):
+     # Run-Name à la CleanRL
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    return run_name
 
 def make_networks(args, device):
     

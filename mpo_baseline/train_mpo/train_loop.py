@@ -78,12 +78,7 @@ def train_loop(
         
     
   
-    runtime_M_step = 0.0
-    runtime_policy_eval = 0.0
-    runtime_eval = 0.0
-    runtime_sample_minibatch = 0.0
-    runtime_sample_actions = 0.0
-    runtime_t_critic_forward = 0.0
+   
     best_video_reward = 0.0
 
     print(f"[DEBUG] start with number of steps = {len(replaybuffer)}, maximal number of environment steps: {args.max_training_steps}")       
@@ -207,7 +202,7 @@ def train_loop(
                     )
                 
                 t_E_step_end = time.perf_counter()         
-                Runtime.E_Step += t_E_step_end - t_E_step_start
+                Runtime.E_step += t_E_step_end - t_E_step_start
 
                 # M-step (actor / policy update)
                 t_M_step_start = time.perf_counter()
@@ -228,7 +223,7 @@ def train_loop(
                     writer = writer,
                     args = args,
                     replaybuffer = replaybuffer,
-                    runtime = Runtime, 
+                    Runtime = Runtime, 
                     stats_m_step = stats_m_step,
                     stats_e_step = stats_e_step,
                     critic_update_stats = critic_update_stats,
