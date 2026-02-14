@@ -95,8 +95,7 @@ def train_loop(
  
 
     while num_steps < args.max_training_steps:
-        if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
-                torch.compiler.cudagraph_mark_step_begin()
+
         # Collect fresh experience for this iteration
         t_env_start = time.perf_counter()
         new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device, gpu_buffer)
@@ -133,7 +132,8 @@ def train_loop(
 
         # Perform several updates per iteration (UTD ratio)
         for i_update in range(num_updates_per_iter):
-            
+            # if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
+            #     torch.compiler.cudagraph_mark_step_begin()
             grad_updates += 1
             
             buffer_size= len(replaybuffer)
@@ -258,5 +258,30 @@ def train_loop(
         it += 1  
         # Increase global update counter after each gradient update    
     
-
+    mpo.actor.eval()
+    with torch.no_grad():
+        save_actor_only(mpo.actor, args, num_steps=num_steps, grad_updates=grad_updates, out_dir="checkpoints")
+    mpo.actor.train()
     pbar.close()
+
+
+def save_actor_only(actor: torch.nn.Module, args, num_steps: int, grad_updates: int, out_dir: str = "checkpoints"):
+    os.makedirs(out_dir, exist_ok=True)
+
+    payload = {
+        "actor_state_dict": actor.state_dict(),
+        "num_steps": int(num_steps),
+        "grad_updates": int(grad_updates),
+        "run_name": getattr(args, "run_name", None),
+        "timestamp": time.strftime("%Y%m%d-%H%M%S"),
+        "args": vars(args) if hasattr(args, "__dict__") else None,
+    }
+
+    filename = f"{payload['run_name'] or 'run'}_actor_steps{num_steps}_gu{grad_updates}.pt"
+    final_path = os.path.join(out_dir, filename)
+    tmp_path = final_path + ".tmp"
+
+    # Save atomically
+    torch.save(payload, tmp_path)
+    os.replace(tmp_path, final_path)
+    print(f"[SAVE] Actor saved to: {final_path}")

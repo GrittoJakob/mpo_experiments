@@ -94,6 +94,7 @@ def evaluate_inverted(args, actor, eval_env, writer, device, global_step):
         rewards_by_task = {}     # z.B. {1.0: [..episoden..], -1.0: [..]}
         len_by_task = {}
         actions_by_task = {}
+        task_reward_by_task = {}
         eval_tasks = [{"task_mode": 1.0}, {"task_mode": -1.0}]
 
         for task_options in eval_tasks:
@@ -256,8 +257,6 @@ def evaluate_target_goal(args, actor, eval_env, writer, device, global_step):
 
     return mean_return, mean_len
 
-import numpy as np
-import torch
 
 def evaluate_erfi(args, actor, eval_env, writer, device, global_step):
     """

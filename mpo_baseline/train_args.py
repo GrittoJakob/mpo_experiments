@@ -31,7 +31,7 @@ class Args:
     """number of threads to use"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
-    log_videos_period: int = 100
+    log_videos_period: int = 75
     """iterations per logging exactly one episode video"""
     buffer_on_cuda: bool = True
     """store replay_buffer on cuda"""
@@ -78,7 +78,7 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_replay_buffer: int = 1000000
+    max_replay_buffer: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
@@ -117,7 +117,7 @@ class Args:
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 4000000
+    max_training_steps: int = 5000000
     """Maximal number of env steps for training"""
 
     # ===============================
@@ -151,7 +151,7 @@ class Args:
     # ===============================
     use_compile: bool = True
     """torch.compilation flag"""
-    compile_mode: str=  "reduce-overhead"
+    compile_mode: str=  "default"
     """compile mode for torch compilation"""
 
     # ===============================
@@ -159,7 +159,7 @@ class Args:
     # ===============================
     ctrl_cost_weight: float = 0.5
     """ Weight for ctrl_cost term, default = 0.5"""
-    healthy_reward_weight: float = 1.2
+    healthy_reward_weight: float = 0.7
     """Weight for healthy_reward term, default = 1.2, 0.8 for multi task"""
     contact_cost_weight: float = 5e-4
     """Weight for contact_cost term, default = 5e-4"""
@@ -172,11 +172,11 @@ class Args:
     # ===============================
 
     ## in train_args.py 
-    task_mode: str = "default" 
+    task_mode: str = "inverted_multi_task" 
     """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
-    velocity_reward_scale: float = 1.7
+    velocity_reward_scale: float = 1.75
     """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.7
+    scale_wrong_direction_reward: float = 1.75
     """scale parameter for scale if velocity is wrong direction"""
     position_reward_scale: float = 5
     goal_radius: float = 25
@@ -191,7 +191,7 @@ class Args:
     """flag for exlude/include central force terms in observations"""
 
     
-    rand_mode: str = "ERFI"
+    rand_mode: str = "default"
     """the environment parametrization type for meta-learning""" # Currently supports ERFI, RAO, RFI, and None (no param randomization)
     rand_split_ratio: float = 0.5
     """the ratio at which to split the population for ERFI mode, if 0.9 the first 90% of the population uses RFI and the last 10% uses RAO"""
