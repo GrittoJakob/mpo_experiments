@@ -83,8 +83,12 @@ def collect_rollout_vec_env(env: gym.vector.AsyncVectorEnv, args, actor, replayb
                 v_rew = _info_vec(info, "velocity_reward", num_envs, 0.0)
                 p_rew = _info_vec(info, "position_reward", num_envs, 0.0)
                 t_inv = np.zeros((num_envs,), dtype=np.float32)
+            elif args.task_mode == "target_goal_ferdinand":
+                v_rew = _info_vec(info, "velocity_reward", num_envs, 0.0)
+                p_rew = prog = t_inv = np.zeros((num_envs,), dtype=np.float32)
             else:
                 v_rew = p_rew = prog = t_inv = np.zeros((num_envs,), dtype=np.float32)
+            
 
             # store transitions ONLY for envs still recording
             for i in range(num_envs):

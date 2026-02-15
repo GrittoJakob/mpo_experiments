@@ -25,7 +25,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 250
+    log_period: int = 400
     "number of global updates per log to wandb"
     num_threads: int = 16
     """number of threads to use"""
@@ -70,7 +70,7 @@ class Args:
     """learning rate / scale factor for updating eta_mu (mean KL Lagrange multiplier)"""
     alpha_var_scale: float = 0.5
     """learning rate / scale factor for updating eta_sigma (variance KL Lagrange multiplier)"""
-    alpha_mean_max: float = 4.0
+    alpha_mean_max: float = 5.0
     """maximum clamp value for eta_mu (mean KL Lagrange multiplier)"""
     alpha_var_max: float = 100.00
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
@@ -98,7 +98,7 @@ class Args:
     """flag for using action penalty"""
     eps_penalty:float = 1e-3
     """constrain for action penalty loss term"""
-    penalty_mix: float = 0.49
+    penalty_mix: float = 0.25
     """parameter for mixing dual_losses in E-Step (action penalty and normal dual loss)"""
     use_action_clipping: bool = True
     """whether to use action clipping in rollout to save clipped action or not"""
@@ -157,37 +157,61 @@ class Args:
     # ===============================
     # Reward shaping for ant env
     # ===============================
-    ctrl_cost_weight: float = 0.5
-    """ Weight for ctrl_cost term, default = 0.5"""
-    healthy_reward_weight: float = 0.7
-    """Weight for healthy_reward term, default = 1.2, 0.8 for multi task"""
-    contact_cost_weight: float = 5e-4
-    """Weight for contact_cost term, default = 5e-4"""
-    forward_reward_weight: float = 1.0
-    """Weight for forward_reward term, default = 1"""
+    # ctrl_cost_weight: float = 0.5
+    # """ Weight for ctrl_cost term, default = 0.5"""
+    # healthy_reward_weight: float = 0.8
+    # """Weight for healthy_reward term, default = 1.2, 0.8 for multi task"""
+    # contact_cost_weight: float = 5e-4
+    # """Weight for contact_cost term, default = 5e-4"""
+    # forward_reward_weight: float = 1.0
+    # """Weight for forward_reward term, default = 1"""
 
 
     # ===============================
     # Multi-Task settings
     # ===============================
 
-    ## in train_args.py 
-    task_mode: str = "inverted_multi_task" 
-    """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
-    velocity_reward_scale: float = 1.75
+    # Task Constraints
+    ctrl_cost_weight: float = 0.5
+    """ Weight for ctrl_cost term, default = 0.5"""
+    healthy_reward_weight: float = 1.0
+    """Weight for healthy_reward term, default = 1.2"""
+    contact_cost_weight: float = 5e-4
+    """Weight for contact_cost term, default = 5e-4"""
+    forward_reward_weight: float = 1.0
+    """Weight for forward_reward term, default = 1"""
+
+    velocity_reward_scale: float = 2.0
     """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.75
+    scale_wrong_direction_reward: float = 1.0
     """scale parameter for scale if velocity is wrong direction"""
+    movement_bonus_scale: float = 0.1
+    """scale parameter for movement reward, movement in any direction"""
+    tilt_penalty_weight: float = 1.0 
+    """weight parameter for tilt penalty, penalizes only excess tilt over threshold"""
+    death_penalty: float = -50.0
     position_reward_scale: float = 5
-    goal_radius: float = 25
     success_radius: float = 2
     maximum_area: float = 100
-    history_len: int = 5
-    """lenght of history to append in obs"""
-    append_task_reward: bool = False
-    """to append the specific task reward in obs"""
+
+
+    # ## in train_args.py 
+    task_mode: str = "target_goal_ferdinand" 
+    """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
+    # velocity_reward_scale: float = 1.75
+    # """scale parameter for reward flipped velocity"""
+    # scale_wrong_direction_reward: float = 1.75
+    # """scale parameter for scale if velocity is wrong direction"""
+    # position_reward_scale: float = 5
+    # goal_radius: float = 25
+    # success_radius: float = 2
+    # maximum_area: float = 100
+    # history_len: int = 5
+    # """lenght of history to append in obs"""
+    # append_task_reward: bool = False
+    # """to append the specific task reward in obs"""
     track_trajectory: bool = False
-    include_cfrc_ext_in_observation: bool = False
+    include_cfrc_ext_in_observation: bool = True
     """flag for exlude/include central force terms in observations"""
 
     

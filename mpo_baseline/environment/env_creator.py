@@ -3,7 +3,8 @@ from typing import Optional
 import os
 import gymnasium as gym
 from .task_wrapper import InvertedVelocityWrapper, GoalPositionWrapper
-from .multi_task_wrapper import Multi_Task_InvertedWrapper
+from .multi_task_wrapper import Multi_Task_InvertedWrapper,GoalPositionWrapper_wo_Task_Hint 
+from .wrapper_ferdinand import GoalPositionWrapper_Ferdinand
 from .ERFI_Wrappers import RAOActionWrapper, RFIActionWrapper, ERFIEvalActionWrapper
 
 
@@ -27,6 +28,11 @@ def maybe_wrap_task(env, args, *, rank: Optional[int] = None, split_idx: Optiona
         env = GoalPositionWrapper(env, args)
     elif getattr(args, "task_mode", "default") == "inverted_multi_task":
         env = Multi_Task_InvertedWrapper(env, args, args.history_len, args.append_task_reward)
+    elif getattr(args, "task_mode", "default") == "target_goal_wo_hint":
+        env = GoalPositionWrapper_wo_Task_Hint(env, args, args.history_len, args.append_task_reward)
+        print("target_goal")
+    elif getattr(args, "task_mode", "default") == "target_goal_ferdinand":
+        env = GoalPositionWrapper_Ferdinand(env, args)
 
     # --- randomization wrappers ---
     random_mode = getattr(args, "rand_mode", None)

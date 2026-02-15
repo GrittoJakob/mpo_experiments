@@ -259,17 +259,23 @@ def train_loop(
         # Increase global update counter after each gradient update    
     
     mpo.actor.eval()
+    mpo.critic.eval()
     with torch.no_grad():
-        save_actor_only(mpo.actor, args, num_steps=num_steps, grad_updates=grad_updates, out_dir="checkpoints")
+        save_actor_critic(mpo, args, num_steps=num_steps, grad_updates=grad_updates, out_dir="checkpoints")
     mpo.actor.train()
+    mpo.critic.train()
     pbar.close()
 
-
-def save_actor_only(actor: torch.nn.Module, args, num_steps: int, grad_updates: int, out_dir: str = "checkpoints"):
+def save_actor_critic(mpo, args, num_steps: int, grad_updates: int, out_dir: str = "checkpoints"):
+    """
+    Speichert Actor + Critic gemeinsam (atomar) in einer .pt-Datei.
+    Erwartet mpo.actor und mpo.critic.
+    """
     os.makedirs(out_dir, exist_ok=True)
 
     payload = {
-        "actor_state_dict": actor.state_dict(),
+        "actor_state_dict": mpo.actor.state_dict(),
+        "critic_state_dict": mpo.critic.state_dict(),
         "num_steps": int(num_steps),
         "grad_updates": int(grad_updates),
         "run_name": getattr(args, "run_name", None),
@@ -277,11 +283,13 @@ def save_actor_only(actor: torch.nn.Module, args, num_steps: int, grad_updates: 
         "args": vars(args) if hasattr(args, "__dict__") else None,
     }
 
-    filename = f"{payload['run_name'] or 'run'}_actor_steps{num_steps}_gu{grad_updates}.pt"
+    filename = f"{payload['run_name'] or 'run'}_ac_steps{num_steps}_gu{grad_updates}.pt"
     final_path = os.path.join(out_dir, filename)
     tmp_path = final_path + ".tmp"
 
-    # Save atomically
     torch.save(payload, tmp_path)
     os.replace(tmp_path, final_path)
-    print(f"[SAVE] Actor saved to: {final_path}")
+    print(f"[SAVE] Actor+Critic saved to: {final_path}")
+
+
+

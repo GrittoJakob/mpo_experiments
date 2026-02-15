@@ -6,7 +6,7 @@ def gaussian_kl_diag(mu_off, mu_on, std_off, std_on, use_mass_force_KL, eps: flo
     """
     mu/std: [B, A] oder allgemein [..., A]
     Returns: (A,), (A,), scalar, scalar
-    """nnnnn
+    """
     std_off = std_off.clamp_min(eps)
     std_on  = std_on.clamp_min(eps)
 

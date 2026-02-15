@@ -13,8 +13,10 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     if args.task_mode in ["inverted", "inverted_multi_task"]:
         return evaluate_inverted(args, actor, eval_env, writer, device, global_step)
 
-    if args.task_mode == "target_goal":
+    if args.task_mode in ("target_goal", "target_goal_wo_hint"):
         return evaluate_target_goal(args, actor, eval_env, writer, device, global_step)
+    elif args.task_mode in ("target_goal", "target_goal_ferdinand"):
+        return evaluate_target_goal_deterministic(args, actor, eval_env, writer, device, global_step)
     elif args.rand_mode == "ERFI":
         return evaluate_erfi(args, actor, eval_env, writer, device, global_step)
 
@@ -342,5 +344,121 @@ def evaluate_erfi(args, actor, eval_env, writer, device, global_step):
         f"RFI: {np.mean(returns_by_mode['RFI']):.2f} | RAO: {np.mean(returns_by_mode['RAO']):.2f}"
     )
     actor.train()
+
+    return mean_return, mean_len
+
+def evaluate_target_goal_deterministic(args, actor, eval_env, writer, device, global_step):
+    """
+    Deterministic evaluation with 4 fixed goal-trajectories on the plane (no circle).
+    Each episode uses a *goal_series* so that when the agent reaches a goal inside the
+    same episode, the wrapper switches deterministically to the next goal WITHOUT reset.
+
+    You will insert the 4 trajectories yourself (each is a list of (x,y) tuples).
+    """
+
+    # How many goals to provide per episode (should be long enough so the queue never empties)
+    # If you don't set args.eval_goal_series_len, we default to evaluate_episode_maxstep
+    series_len = int(getattr(args, "eval_goal_series_len", args.evaluate_episode_maxstep))
+
+    # =========================
+    # >>> INSERT YOUR GOALS HERE
+    # =========================
+    # Each trajectory must be a LIST of (x, y) tuples (or lists).
+    # Example:
+    # traj_0 = [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0)]
+    # traj_1 = [(-1.0, 1.0), (-2.0, 1.0)]
+    # traj_2 = [(1.0, -1.0)]
+    # traj_3 = [(-1.0, -1.0), (-2.0, -2.0)]
+    #
+    # IMPORTANT:
+    # - Coordinates should lie within [-args.maximum_area, +args.maximum_area]
+    # - If the episode is long and the agent reaches many goals, we will repeat the
+    #   trajectory to fill `series_len`.
+
+    max_area = float(args.maximum_area)
+
+    traj_0_unit = [(0.5, 0.2), (-0.6, 0.2), (0.6, -0.6), (0.4, 0.7)]   # in [-1,1]
+    traj_1_unit = [(0.1, 0.8), (-0.7, 0.2), (-0.1, -0.6), (0.8, 0.4)]
+    traj_2_unit = [(-0.45, 0.6), (0.6, -0.3), (0.3, 0.5), (0.9, -0.6)]
+    traj_3_unit = [(0.5, 0.0), (-0.5, 0.0), (0.0, -0.5), (0.0, 0.5)]
+
+    traj_0 = [(max_area*x, max_area*y) for (x,y) in traj_0_unit]
+    traj_1 = [(max_area*x, max_area*y) for (x,y) in traj_1_unit]
+    traj_2 = [(max_area*x, max_area*y) for (x,y) in traj_2_unit]
+    traj_3 = [(max_area*x, max_area*y) for (x,y) in traj_3_unit]
+    trajectories = [traj_0, traj_1, traj_2, traj_3]
+    num_fixed_positions = 4
+    # =========================
+    # <<< END: INSERT YOUR GOALS
+    # =========================
+
+    # Quick sanity check so you get a clear error if you forgot to add goals
+    for i, traj in enumerate(trajectories):
+        if not isinstance(traj, (list, tuple)) or len(traj) == 0:
+            raise ValueError(
+                f"Trajectory {i} is empty. Please insert at least one (x,y) goal into traj_{i}."
+            )
+
+    with torch.no_grad():
+        total_returns = []
+        total_lengths = []
+        action_list = []
+
+        returns_by_traj = {i: [] for i in range(num_fixed_positions)}
+
+        for ep_idx in range(int(args.evaluate_episode_num)):
+            traj_idx = ep_idx % num_fixed_positions
+            traj = trajectories[traj_idx]
+
+            # Build a deterministic goal_series for this episode by repeating the trajectory
+            goal_series = [traj[i % len(traj)] for i in range(series_len)]
+
+            # IMPORTANT: use goal_series so wrapper can switch goals within the same episode
+            options = {"goal_series": goal_series}
+            state, info = eval_env.reset(options=options)
+
+            ep_return = 0.0
+            ep_steps = 0
+
+            for s in range(int(args.evaluate_episode_maxstep)):
+                state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
+                action = actor.action(state_tensor, deterministic=True)
+
+                if getattr(args, "use_action_clipping", False):
+                    action = np.clip(action, args.action_space_low, args.action_space_high)
+
+                action_list.append(action)
+
+                next_state, reward, terminated, truncated, info = eval_env.step(action)
+                ep_return += float(reward)
+                ep_steps += 1
+
+                if terminated or truncated:
+                    break
+
+                state = next_state
+
+            total_returns.append(ep_return)
+            total_lengths.append(ep_steps)
+            returns_by_traj[traj_idx].append(ep_return)
+
+        mean_return = float(np.mean(total_returns)) if total_returns else 0.0
+        mean_len = float(np.mean(total_lengths)) if total_lengths else 0.0
+
+    # ---- Logging ----
+    writer.add_scalar("eval/episodic_return", mean_return, global_step)
+    writer.add_scalar("eval/episodic_length", mean_len, global_step)
+
+    # per-trajectory return logging
+    for i in range(num_fixed_positions):
+        if len(returns_by_traj[i]) > 0:
+            writer.add_scalar(f"eval/return_traj_{i}", float(np.mean(returns_by_traj[i])), global_step)
+
+    # Action stats
+    if len(action_list) > 0:
+        actions = np.stack(action_list, axis=0)
+        writer.add_scalar("eval/action_mean_abs", float(np.mean(np.abs(actions))), global_step)
+        writer.add_scalar("eval/action_max_abs",  float(np.max(np.abs(actions))), global_step)
+        writer.add_scalar("eval/action_mean",     float(np.mean(actions)), global_step)
 
     return mean_return, mean_len
