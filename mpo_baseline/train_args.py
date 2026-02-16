@@ -37,6 +37,7 @@ class Args:
     """store replay_buffer on cuda"""
     num_envs: int = 4
     asynchronous: bool = True
+    ckpt_path = "/home/jakob_gritto/tum-adlr-ws26-09/mpo_baseline/checkpoints/Final_run_target_goal_for_poster.pt"
     
 
     # ===============================
@@ -215,7 +216,7 @@ class Args:
     """flag for exlude/include central force terms in observations"""
 
     
-    rand_mode: str = "default"
+    rand_mode: str = "ERFI"
     """the environment parametrization type for meta-learning""" # Currently supports ERFI, RAO, RFI, and None (no param randomization)
     rand_split_ratio: float = 0.5
     """the ratio at which to split the population for ERFI mode, if 0.9 the first 90% of the population uses RFI and the last 10% uses RAO"""

@@ -27,6 +27,14 @@ class GoalPositionWrapper_Ferdinand(gym.Wrapper):
             self.logger.addHandler(h)
         self.logger.setLevel(log_level)
 
+        self.spawn_noise_scale = getattr(args, "spawn_noise_scale", 0.1)          # joint noise
+        self.spawn_vel_noise_scale = getattr(args, "spawn_vel_noise_scale", 0.1)  # qvel noise
+        self.randomize_yaw = getattr(args, "spawn_randomize_yaw", True)
+        self.current_max_yaw = float(getattr(args, "spawn_max_yaw", np.pi))         
+        self.spawn_settle_steps = int(getattr(args, "spawn_settle_steps", 3))
+        self.spawn_height = float(getattr(args, "spawn_height", 0.80))
+        self._rng = np.random.default_rng()
+
         # --- 1. CONFIGURATION ---
         self.vel_scale = args.velocity_reward_scale
         self.pos_scale = args.position_reward_scale
@@ -220,6 +228,14 @@ class GoalPositionWrapper_Ferdinand(gym.Wrapper):
         
         obs, info = self.env.reset(seed=seed, options=options_env)
         
+        # >>> Random spawn pose (yaw/joints/vel) <<<
+        new_obs = self._apply_random_spawn_pose(seed=seed)
+        if new_obs is not None:
+            obs = new_obs
+            # info kann jetzt "stale" positions enthalten -> wir überschreiben eh gleich via _get_xy_from_info()
+            info.pop("x_position", None)
+            info.pop("y_position", None)
+
         if self.goal_queue:
             self.goal = np.array(self.goal_queue.pop(0), dtype=np.float64)
             self.is_random_wandering = False
@@ -321,3 +337,55 @@ class GoalPositionWrapper_Ferdinand(gym.Wrapper):
         info["reached_goal"] = reached
 
         return obs, total_reward, terminated, truncated, info
+
+    def update_angle_range(self, max_rad: float):
+        """Optional: von außen die Yaw-Range setzen (z.B. Curriculum)."""
+        self.current_max_yaw = float(max_rad)
+
+    def _apply_random_spawn_pose(self, seed=None):
+        """Modifies MuJoCo state: joint noise + yaw randomization + vel noise."""
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+
+        base = self.env.unwrapped
+        if not (hasattr(base, "model") and hasattr(base, "init_qpos") and hasattr(base, "init_qvel")):
+            # Kein Mujoco/Ant -> nichts tun
+            return None
+
+        model = base.model
+        qpos = base.init_qpos.copy()
+        qvel = base.init_qvel.copy()
+
+        # Joint noise (ab Index 7)
+        if model.nq > 7 and self.spawn_noise_scale > 0:
+            joint_noise = self._rng.uniform(-self.spawn_noise_scale, self.spawn_noise_scale, size=model.nq - 7)
+            qpos[7:] += joint_noise
+
+        # Yaw randomization: q = [cos(a/2), 0, 0, sin(a/2)]
+        if self.randomize_yaw and self.current_max_yaw > 0:
+            a = self._rng.uniform(-self.current_max_yaw, self.current_max_yaw)
+            yaw_quat = np.array([np.cos(a / 2), 0.0, 0.0, np.sin(a / 2)], dtype=np.float64)
+            qpos[3:7] = yaw_quat
+        else:
+            # optional: tiny quat noise to break symmetry
+            if self.spawn_noise_scale > 0:
+                quat_noise = self._rng.uniform(-self.spawn_noise_scale, self.spawn_noise_scale, size=4)
+                qpos[3:7] = qpos[3:7] + quat_noise
+                qpos[3:7] /= (np.linalg.norm(qpos[3:7]) + 1e-8)
+
+        # Height
+        qpos[2] = self.spawn_height
+
+        # Velocity noise
+        if self.spawn_vel_noise_scale > 0:
+            qvel = qvel + self._rng.normal(0.0, self.spawn_vel_noise_scale, size=model.nv)
+
+        # Commit
+        base.set_state(qpos, qvel)
+
+        # Settle physics
+        for _ in range(self.spawn_settle_steps):
+            base.do_simulation(np.zeros(model.nu), base.frame_skip)
+
+        # Fresh raw obs from base env (bypasses inner wrappers!)
+        return base._get_obs()

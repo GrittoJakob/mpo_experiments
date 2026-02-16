@@ -55,6 +55,36 @@ def init_runname(args):
      # Run-Name à la CleanRL
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     return run_name
+    
+def load_actor_critic_checkpoint(
+    checkpoint_path: str,
+    actor: torch.nn.Module,
+    critic: torch.nn.Module,
+    target_actor: Optional[torch.nn.Module],
+    target_critic: Optional[torch.nn.Module],
+    device: torch.device,
+    strict: bool = True,
+    ):
+    if not os.path.isfile(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+    ckpt = torch.load(checkpoint_path, map_location=device,weights_only=False)
+
+    actor.load_state_dict(ckpt["actor_state_dict"], strict=strict)
+    critic.load_state_dict(ckpt["critic_state_dict"], strict=strict)
+
+    # Targets direkt auf denselben Stand bringen
+    if target_actor is not None:
+        target_actor.load_state_dict(actor.state_dict(), strict=True)
+    if target_critic is not None:
+        target_critic.load_state_dict(critic.state_dict(), strict=True)
+
+    print(
+        f"[LOAD] Loaded actor+critic from: {checkpoint_path} | "
+        f"steps={ckpt.get('num_steps')} gu={ckpt.get('grad_updates')}"
+    )
+    return ckpt
+
 
 def make_networks(args, device):
     
@@ -104,6 +134,19 @@ def train():
 
     # Create Networks
     actor, critic, target_actor, target_critic = make_networks(args, device)
+
+    #Load nets
+    
+    _ckpt = load_actor_critic_checkpoint(
+        checkpoint_path=args.ckpt_path,
+        actor=actor,
+        critic=critic,
+        target_actor=target_actor,
+        target_critic=target_critic,
+        device=device,
+        strict=True,
+    )
+
 
     # Create Optimizer
     actor_optimizer, critic_optimizer = make_optimizer(args, actor, critic)
