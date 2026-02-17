@@ -65,6 +65,8 @@ def train_loop(
     num_steps = 0
     it = 1
     grad_updates = 0
+    
+
     @dataclass
     class Runtime: 
         rollout: float = 0.0
@@ -93,7 +95,7 @@ def train_loop(
     # Main training iterations
     pbar = tqdm(total=args.max_training_steps, desc="Env steps")
  
-
+    next_save_step = ((num_steps // args.save_every_env_steps) + 1) * args.save_every_env_steps
     while num_steps < args.max_training_steps:
 
         # Collect fresh experience for this iteration
@@ -102,6 +104,21 @@ def train_loop(
 
         #Update current steps for while loop
         num_steps += new_steps
+
+        while num_steps >= next_save_step:
+            mpo.actor.eval()
+            mpo.critic.eval()
+            with torch.no_grad():
+                # IMPORTANT: pass next_save_step so filename/payload uses exactly 1M/2M/...
+                save_actor_critic(
+                    mpo, args,
+                    num_steps=next_save_step,
+                    grad_updates=grad_updates,
+                    out_dir="checkpoints"
+                )
+            mpo.actor.train()
+            mpo.critic.train()
+            next_save_step += args.save_every_env_steps
         
         if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
@@ -178,7 +195,7 @@ def train_loop(
 
             # Policy evaluation (critic update)
             t_policy_eval_start = time.perf_counter()
-            collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0) and (num_steps > 1000000)
+            collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0)
             critic_update_stats = mpo.critic_update_td( 
                 next_target_q = next_target_q,
                 state_batch =state_batch, 
@@ -193,7 +210,7 @@ def train_loop(
             Runtime.Critic_update += t_policy_eval_end - t_policy_eval_start
 
 
-            if (i_update % args.delay_policy_update == 0) and (num_steps > 1000000):
+            if (i_update % args.delay_policy_update == 0):
                 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()

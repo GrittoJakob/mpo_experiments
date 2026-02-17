@@ -55,9 +55,9 @@ class Args:
     """hidden size of actor network"""
     hidden_size_critic: int = 512
     """hidden size of critc network"""
-    actor_lr: float = 7e-5
+    actor_lr: float = 1e-4
     """Learning rate for actor Adam optimizer"""
-    critic_lr: float = 7e-5
+    critic_lr: float = 1e-4
     """Learning rate for critic adam optimizer"""
     eta_lr : float = 1e-3
     "Learning rate for dual function"
@@ -77,15 +77,15 @@ class Args:
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
     q_loss_type: str = 'mse'
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
-    UTD_ratio: float = 0.3
+    UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
     max_replay_buffer: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
-    warm_up_steps: int = 25000
+    warm_up_steps: int = 15000
     """number of warm-up steps for the buffer"""
-    delay_policy_update: int = 4
+    delay_policy_update: int = 2
     """number of critic updates per policy update"""
     init_eta_mu: float = 0.5
     """int value of eta mu"""
@@ -118,14 +118,14 @@ class Args:
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 3000000
+    max_training_steps: int = 5000000
     """Maximal number of env steps for training"""
 
     # ===============================
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 5
+    evaluate_period: int = 10
     """evaluate the agent every N iterations"""
     evaluate_episode_num: int = 4
     """how many evaluation episodes to run"""
@@ -146,6 +146,8 @@ class Args:
     """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
     save_replay_buffer: bool = True
     """whether to include replay buffer in checkpoints (large files!)"""
+    save_every_env_steps: int = 1000000
+
 
     # ===============================
     # warm up compilation
