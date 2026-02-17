@@ -178,7 +178,7 @@ def train_loop(
 
             # Policy evaluation (critic update)
             t_policy_eval_start = time.perf_counter()
-            collect_stats = args.wandb_track and (i_update % args.log_period == 0)
+            collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0) and (num_steps > 1000000)
             critic_update_stats = mpo.critic_update_td( 
                 next_target_q = next_target_q,
                 state_batch =state_batch, 
@@ -193,7 +193,7 @@ def train_loop(
             Runtime.Critic_update += t_policy_eval_end - t_policy_eval_start
 
 
-            if i_update % args.delay_policy_update == 0:
+            if (i_update % args.delay_policy_update == 0) and (num_steps > 1000000):
                 
                 # E-step (build non-parametric target distribution)
                 t_E_step_start = time.perf_counter()
@@ -220,7 +220,7 @@ def train_loop(
 
 
             # logging 
-            if args.wandb_track and i_update % args.log_period == 0:
+            if args.wandb_track and (i_update % args.log_period == 0) and collect_stats:
                 logging_wandb(
                     writer = writer,
                     args = args,

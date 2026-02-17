@@ -68,23 +68,24 @@ def load_actor_critic_checkpoint(
     if not os.path.isfile(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    ckpt = torch.load(checkpoint_path, map_location=device,weights_only=False)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    if "actor_state_dict" not in ckpt:
+        raise KeyError("Checkpoint enthält kein 'actor_state_dict'.")
 
     actor.load_state_dict(ckpt["actor_state_dict"], strict=strict)
-    critic.load_state_dict(ckpt["critic_state_dict"], strict=strict)
 
-    # Targets direkt auf denselben Stand bringen
+    # Target-Actor auf denselben Stand bringen
     if target_actor is not None:
         target_actor.load_state_dict(actor.state_dict(), strict=True)
-    if target_critic is not None:
-        target_critic.load_state_dict(critic.state_dict(), strict=True)
 
+    
     print(
-        f"[LOAD] Loaded actor+critic from: {checkpoint_path} | "
-        f"steps={ckpt.get('num_steps')} gu={ckpt.get('grad_updates')}"
+        f"[LOAD] Loaded ACTOR ONLY from: {checkpoint_path} | "
+        f"steps={ckpt.get('num_steps')} gu={ckpt.get('grad_updates')} | "
     )
-    return ckpt
 
+    return ckpt
 
 def make_networks(args, device):
     

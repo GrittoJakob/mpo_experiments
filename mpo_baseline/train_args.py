@@ -25,7 +25,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 400
+    log_period: int = 200
     "number of global updates per log to wandb"
     num_threads: int = 16
     """number of threads to use"""
@@ -55,9 +55,9 @@ class Args:
     """hidden size of actor network"""
     hidden_size_critic: int = 512
     """hidden size of critc network"""
-    actor_lr: float = 1e-4
+    actor_lr: float = 7e-5
     """Learning rate for actor Adam optimizer"""
-    critic_lr: float = 1e-4
+    critic_lr: float = 7e-5
     """Learning rate for critic adam optimizer"""
     eta_lr : float = 1e-3
     "Learning rate for dual function"
@@ -77,15 +77,15 @@ class Args:
     """maximum clamp value for eta_sigma (variance KL Lagrange multiplier)"""
     q_loss_type: str = 'mse'
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
-    UTD_ratio: float = 0.5
+    UTD_ratio: float = 0.3
     """ Ratio: num_updates per env step"""
     max_replay_buffer: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
-    warm_up_steps: int = 15000
+    warm_up_steps: int = 25000
     """number of warm-up steps for the buffer"""
-    delay_policy_update: int = 2
+    delay_policy_update: int = 4
     """number of critic updates per policy update"""
     init_eta_mu: float = 0.5
     """int value of eta mu"""
@@ -118,7 +118,7 @@ class Args:
     """batch size used when sampling from replay buffer"""
     print_replay_buffer: bool = False
     """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 5000000
+    max_training_steps: int = 3000000
     """Maximal number of env steps for training"""
 
     # ===============================
@@ -182,18 +182,19 @@ class Args:
     forward_reward_weight: float = 1.0
     """Weight for forward_reward term, default = 1"""
 
-    velocity_reward_scale: float = 2.0
+    velocity_reward_scale: float = 1.5
     """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.0
+    scale_wrong_direction_reward: float = 1.5
     """scale parameter for scale if velocity is wrong direction"""
     movement_bonus_scale: float = 0.1
     """scale parameter for movement reward, movement in any direction"""
-    tilt_penalty_weight: float = 1.0 
+    tilt_penalty_weight: float = 0.5
     """weight parameter for tilt penalty, penalizes only excess tilt over threshold"""
     death_penalty: float = -50.0
     position_reward_scale: float = 5
     success_radius: float = 2
     maximum_area: float = 100
+    vel_rew_max_speed: float = 4.0
 
 
     # ## in train_args.py 
@@ -220,7 +221,7 @@ class Args:
     """the environment parametrization type for meta-learning""" # Currently supports ERFI, RAO, RFI, and None (no param randomization)
     rand_split_ratio: float = 0.5
     """the ratio at which to split the population for ERFI mode, if 0.9 the first 90% of the population uses RFI and the last 10% uses RAO"""
-    noise_limit: float = 0.05
+    noise_limit: float = 0.1
     """noise limit for RFI and RAO"""
 
            

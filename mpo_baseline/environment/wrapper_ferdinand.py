@@ -41,6 +41,7 @@ class GoalPositionWrapper_Ferdinand(gym.Wrapper):
         self.scale_wrong_direction = args.scale_wrong_direction_reward
         self.movement_bonus_scale = args.movement_bonus_scale
         self.death_penalty = args.death_penalty
+        self.vel_rew_max_speed = float(getattr(args, "vel_rew_max_speed", 4.0))  # m/s cap für v_towards
         
         self.maximum_area = args.maximum_area
         self.success_radius = args.success_radius
@@ -295,7 +296,9 @@ class GoalPositionWrapper_Ferdinand(gym.Wrapper):
         else:
             # We are ON the goal, velocity towards it is effectively zero/undefined
             v_towards = 0.0 
-
+        if self.vel_rew_max_speed > 0:
+            v_towards = np.clip(v_towards, -self.vel_rew_max_speed, self.vel_rew_max_speed)
+            
         vel_rew = self.vel_scale * v_towards
         if vel_rew < 0:
             vel_rew *= self.scale_wrong_direction
