@@ -45,7 +45,7 @@ class RFIActionWrapper(gym.ActionWrapper):
         return np.clip(perturbed_action, low, high)
 
 # ==============================================================================
-# 2. RAO Wrapper (Episodic Bias) - UPDATED
+# 2. RAO Wrapper (Episodic Bias) 
 # ==============================================================================
 class RAOActionWrapper(gym.ActionWrapper):
     def __init__(self, env: gym.Env, noise_limit: float = 0.05):
@@ -55,7 +55,7 @@ class RAOActionWrapper(gym.ActionWrapper):
         self.bias = np.zeros(env.action_space.shape, dtype=env.action_space.dtype)
     
     def set_noise_limit(self, new_limit: float):
-        """Directly set the noise limit (bypassing curriculum)."""
+        """Directly set the noise limit"""
         self.current_limit = float(new_limit)
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):

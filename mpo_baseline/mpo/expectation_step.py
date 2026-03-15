@@ -20,34 +20,35 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
     norm_target_q, loss_temperature = self.compute_weights_temperature_loss(self.eta_dual, target_q, self.eps_dual)
     loss_dual = loss_temperature
 
+    # Initialize action penalty variables with None
     has_oob = None
     penalty_normalized_weights = None
     loss_penalty_temperature = None
     diff_out_of_bound = None
     
+    # Collect stats of normal E-Step without action penalty
     stats = None
     if collect_stats:
         stats = {
             "eta_dual": self.eta_dual.detach(),
-            "norm_target_q_mean": norm_target_q.detach().mean(),
-            "norm_target_q_min":  norm_target_q.detach().amin(),
-            "norm_target_q_max":  norm_target_q.detach().amax(),
-            "loss_dual":          loss_dual.detach(),
+            "loss_dual": loss_dual.detach(),
         }
-
+    # Action Penalty from Google Deepminds Implementation of Multio-objective MPO
     if self.use_action_penalty:
-        # Compute action penalty when out of bound:
+        # Compute quadratic curve when out of bound:
         actions_squashed  = torch.max(torch.min(sampled_actions, self.action_space_high), self.action_space_low)
         diff_out_of_bound = sampled_actions - actions_squashed
         has_oob = (diff_out_of_bound.abs().amax() > 0).to(norm_target_q.dtype)
         
         cost_out_of_bound = -(diff_out_of_bound.pow(2).sum(dim=-1))  # (N,B)
+
+        # Compute dual function for eta and get weights
         penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(
             self.eta_penalty, cost_out_of_bound, self.eps_penalty
             )
 
+        # Mix both weight distributions of original E-Step and action penalty by a mixing factor lambda
         lam_eff = self.lam * has_oob
-
         norm_target_q = (1 - lam_eff) * norm_target_q + lam_eff * penalty_normalized_weights
         norm_target_q = norm_target_q / (norm_target_q.sum(dim=0, keepdim=True) + 1e-8)
         loss_dual = (1 - lam_eff) * loss_dual + lam_eff * loss_penalty_temperature
@@ -68,20 +69,11 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
             self.eta_penalty.grad = None
 
 
-
+        # Collect stats for action penalty
         if self.use_action_penalty and collect_stats:
             stats.update({
                 "eta_penalty": self.eta_penalty.detach(),
-                "has_out_of_bound": has_oob.detach() if has_oob is not None else None,
-                "diff_out_abs_mean": diff_out_of_bound.detach().abs().mean(),
-                "diff_out_abs_max":  diff_out_of_bound.detach().abs().amax(),
-                "penalty_weights_mean": penalty_normalized_weights.detach().mean(),
-                "penalty_weights_min":  penalty_normalized_weights.detach().amin(),
-                "penalty_weights_max":  penalty_normalized_weights.detach().amax(),
-                "norm_weights_mean":  norm_target_q.detach().mean(),
-                "norm_weights_min":  norm_target_q.detach().amin(),
-                "norm_weights_max":  norm_target_q.detach().amax(),
-                "loss_penalty":         loss_penalty_temperature.detach() if loss_penalty_temperature is not None else None,
+                "loss_penalty": loss_penalty_temperature.detach(),
             })
 
     return norm_target_q, stats

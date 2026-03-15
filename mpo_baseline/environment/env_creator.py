@@ -2,9 +2,8 @@ import torch
 from typing import Optional
 import os
 import gymnasium as gym
-from .task_wrapper import InvertedVelocityWrapper, GoalPositionWrapper
-from .multi_task_wrapper import Multi_Task_InvertedWrapper,GoalPositionWrapper_wo_Task_Hint 
-from .wrapper_ferdinand import GoalPositionWrapper_Ferdinand
+from .task_wrapper import GoalPositionWrapper
+from .meta_task_wrapper import Meta_InvertedWrapper 
 from .ERFI_Wrappers import RAOActionWrapper, RFIActionWrapper, ERFIEvalActionWrapper
 
 
@@ -20,41 +19,42 @@ def limit_threads(n: int):
     os.environ["NUMEXPR_NUM_THREADS"] = str(n)
 
 def maybe_wrap_task(env, args, *, rank: Optional[int] = None, split_idx: Optional[int] = None, eval_env: Optional[bool]= False):
-    # --- task wrappers ---
-    
-    if getattr(args, "task_mode", "default") == "inverted":
-        env = InvertedVelocityWrapper(env, args)
-    elif getattr(args, "task_mode", "default") == "target_goal":
+    """ Apply Task wrappers:
+    task_mode: 
+        -default
+        -target_goal: random goals in hyperplane randomly sampled with task hints where goal is
+        -inverted_without_task_hint: inverted goals without task hints 
+    rand_mode:
+        -default
+        -RFI
+        -RAO
+        -ERFI
+    """
+
+    # TASK-MODE
+    if getattr(args, "task_mode", "default") == "target_goal":
         env = GoalPositionWrapper(env, args)
-    elif getattr(args, "task_mode", "default") == "inverted_multi_task":
-        env = Multi_Task_InvertedWrapper(env, args, args.history_len, args.append_task_reward)
-    elif getattr(args, "task_mode", "default") == "target_goal_wo_hint":
-        env = GoalPositionWrapper_wo_Task_Hint(env, args, args.history_len, args.append_task_reward)
-        print("target_goal")
-    elif getattr(args, "task_mode", "default") == "target_goal_ferdinand":
-        env = GoalPositionWrapper_Ferdinand(env, args)
+    elif getattr(args, "task_mode", "default") == "inverted_without_task_hint":
+        env = Meta_InvertedWrapper(env, args, args.history_len, args.append_task_reward)
 
-    # --- randomization wrappers ---
-    random_mode = getattr(args, "rand_mode", None)
-
-    if random_mode == "RFI":
+    # RANDOMIZATION MODE
+    if getattr(args, "rand_mode", "default") == "RFI":
         print("RFI is activated")
-        env = RFIActionWrapper(env, args.final_rand_noise)
+        env = RFIActionWrapper(env, args.noise_limit)
 
-    elif random_mode == "RAO":
+    elif getattr(args, "rand_mode", "default") == "RAO":
         print("RAO is activated")
         env = RAOActionWrapper(env, args.noise_limit)
 
-    elif random_mode == "ERFI" and not eval_env:
+    elif getattr(args, "rand_mode", "defaut") == "ERFI" and not eval_env:
         if rank is None or split_idx is None:
             raise ValueError("ERFI requires rank and split_idx")
-
         if rank < split_idx:
             env = RFIActionWrapper(env, args.noise_limit)
         else:
             env = RAOActionWrapper(env, args.noise_limit)
 
-    elif eval_env and random_mode == "ERFI":
+    elif eval_env and getattr(args, "rand_mode", "default") == "ERFI":
         env = ERFIEvalActionWrapper(
             env,
             rfi_noise=getattr(args, "noise_limit", 0.05),
@@ -67,6 +67,7 @@ def maybe_wrap_task(env, args, *, rank: Optional[int] = None, split_idx: Optiona
 def _make_base_env(env_id: str, args, render_mode: Optional[str] = None):
     """Central Builder, for equality"""
     if env_id == "Ant-v5":
+        # For custom designed reward function
         kwargs = dict(
             ctrl_cost_weight=args.ctrl_cost_weight,
             healthy_reward=args.healthy_reward_weight,
@@ -86,8 +87,8 @@ def _make_base_env(env_id: str, args, render_mode: Optional[str] = None):
 
 def make_train_env(args, env_id, seed, *, rank: Optional[int] = None, split_idx: Optional[int] = None):
     env = _make_base_env(env_id, args, render_mode=None)
-
-    env = maybe_wrap_task(env, args, rank=rank, split_idx=split_idx)
+    if getattr(args, "env_id") == "Ant-v5":
+        env = maybe_wrap_task(env, args, rank=rank, split_idx=split_idx)
 
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
@@ -110,8 +111,9 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
         )
     else:
         env = _make_base_env(env_id, args, render_mode=None)
-
-    env = maybe_wrap_task(env, args, eval_env = True)
+        
+    if getattr(args, "env_id") == "Ant-v5":
+        env = maybe_wrap_task(env, args, eval_env = True)
 
     env.action_space.seed(seed_offset)
     env.observation_space.seed(seed_offset)
@@ -124,11 +126,8 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
 def make_video_env(args, run_name, name_prefix: str):
     return make_eval_env(args, args.env_id, args.seed, True, run_name, name_prefix)
 
-def _train_env_thunk(args, env_id: str, base_seed: int, rank: int, threads_per_worker: Optional[int], split_idx: Optional[int]):
+def _train_env_thunk(args, env_id: str, base_seed: int, rank: int, split_idx: Optional[int]):
     def _thunk():
-        # if threads_per_worker is not None:
-        #     limit_threads(int(threads_per_worker))
-
         seed = int(base_seed) + int(rank)
         return make_train_env(args, env_id, seed, rank=rank, split_idx=split_idx)
     return _thunk
@@ -139,32 +138,27 @@ def make_train_vec_env(
     env_id: str,
     seed: int,
     num_envs: int,
-    asynchronous: bool = True,
-    threads_per_worker: int = 1,
-    mp_context=None,
 ):
+    """Main function for creating Async Vector Training envs"""
     assert num_envs >= 1
 
-    apply_thread_limits = (asynchronous and num_envs > 1)
-    
+    # Compute split index for ERFI envs
     split_idx = None
     if getattr(args, "rand_mode", None) == "ERFI":
-        ratio = float(getattr(args, "rand_split_ratio", 0.5))  # z.B. 0.8
+        ratio = float(getattr(args, "rand_split_ratio", 0.5))  
         ratio = max(0.0, min(1.0, ratio))
-        split_idx = int(round(num_envs * ratio))  # z.B. 10 envs, 0.8 -> 8
+        split_idx = int(round(num_envs * ratio))  
 
 
-    env_fns = [
+    env_thunk = [
         _train_env_thunk(
-            args, env_id, seed,
+            args, 
+            env_id,
+            seed,
             rank=i,
-            threads_per_worker=(threads_per_worker if apply_thread_limits else None),
             split_idx=split_idx,
         )
         for i in range(num_envs)
     ]
 
-    if asynchronous and num_envs > 1:
-        return gym.vector.AsyncVectorEnv(env_fns, context=mp_context)
-    else:
-        return gym.vector.SyncVectorEnv(env_fns)
+    return gym.vector.AsyncVectorEnv(env_thunk)

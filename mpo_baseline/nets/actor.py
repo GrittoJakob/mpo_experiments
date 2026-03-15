@@ -9,120 +9,91 @@ class Actor(nn.Module):
     
     def __init__(self, args):
         super(Actor, self).__init__()
-        self.ds = args.obs_space
-        self.da = args.action_dim
-        self.hs= args.hidden_size_actor
+        self.dim_states = args.obs_space
+        self.dim_action = args.action_dim
+        self.hidden_size= args.hidden_size_actor
         self._printed_init_cov = False
-        self.use_state_dependent_var = args.use_state_dependent_var
         std_init = args.std_init
         self.use_tanh_on_mean = args.use_tanh_on_mean
         
 
         self.backbone = nn.Sequential(
-            nn.Linear(self.ds, self.hs),
-            nn.LayerNorm(self.hs),
+            nn.Linear(self.dim_states, self.hidden_size),
+            nn.LayerNorm(self.hidden_size),
             nn.Tanh(),
-            nn.Linear(self.hs, self.hs),
+            nn.Linear(self.hidden_size, self.hidden_size),
             nn.ELU(),
         )
 
         # zwei getrennte Köpfe
-        self.mean_layer = nn.Linear(self.hs, self.da)
+        self.mean_layer = nn.Linear(self.hidden_size, self.dim_action)
         if self.use_tanh_on_mean:
             self.activation_layer_mean = nn.Tanh()
                # inverse Softplus helper
         def softplus_inv(y):
             return torch.log(torch.exp(torch.tensor(y)) - 1.0)
 
-        if self.use_state_dependent_var:
-
-            self.std_layer = nn.Linear(self.hs, self.da)
-            with torch.no_grad():
-                self.std_layer.weight.zero_()
-                self.std_layer.bias.fill_(softplus_inv(std_init))
-        else:
-            self.log_std = nn.Parameter(torch.ones(self.da) * -0.5) # -1 scaling to make initialization calmer
+        self.std_layer = nn.Linear(self.hidden_size, self.dim_action)
+        with torch.no_grad():
+            self.std_layer.weight.zero_()
+            self.std_layer.bias.fill_(softplus_inv(std_init))
 
     def forward(self, state):
         """
-        forwards input through the network
-        :param state: (B, ds)
-        :return: mean vector (B, da) and cholesky factorization of covariance matrix (B, da, da)
+        forwardim_states input through the network
+        :param state: (B, dim_states)
+        :return: mean vector (B, dim_action) and diagonal covariance matrix (B, dim_action)
+        B = Batch size
         """
-        device = state.device
-        B = state.size(0)
-        ds = self.ds
-        da = self.da
+        
+        preprocessing = self.backbone(state)   # (B, hidden_size)
+        
+        #Mean Head
+        mean = self.mean_layer(preprocessing)   # (B, dim_action)
 
-        x = self.backbone(state)   # (B, hs)
-        
-        #Mean Kopf
-        mean = self.mean_layer(x)   # (B, da)
+        # Only if flag is true in input args(recommended)
         if self.use_tanh_on_mean:
-            mean = self.activation_layer_mean(mean)
+            mean = self.activation_layer_mean(mean)     # (B, dim_action)
         
-        if self.use_state_dependent_var:
-            std = F.softplus(self.std_layer(x))    # (B, da)
-        
-        else:
-            std = self.log_std
+        # State dependant variance layer
+        std = F.softplus(self.std_layer(preprocessing))    # (B, dim_action)
 
         return mean, std
    
      
-    def action(self, state, clip_to_env: bool = False, deterministic: bool = False):
+    def action(self, state, clip_to_env: bool = True, deterministic: bool = False):
         """
-        :param state: (ds,)
+        :param state: (dim_states,)
+        :clip_to_env: Flag for clipping the action to the environment action bounds
+        :deterministic: Flag for using deterministic action (mean) instead of sampling from the distribution, used in eval mode
         :return: an action
         """
         with torch.no_grad():
+            # Ensure input is batched 
             is_batched = (state.ndim == 2)
             state_batched = self.ensure_batched(state)
+
+            # Forward pass
             mean, std = self.forward(state_batched)
             action_distribution = Independent(Normal(mean, std), 1)
 
+            # Action sampling
             if deterministic:
                 action = mean
             else:
                 action = action_distribution.sample()
 
+            # Action clipping to env action bounds
             if clip_to_env:
                 low = torch.as_tensor(self.env.action_space.low, device=action.device, dtype=action.dtype)
                 high = torch.as_tensor(self.env.action_space.high, device=action.device, dtype=action.dtype)
                 action = torch.clamp(action, low, high)
+            
+            # Ensure action dimension
             if not is_batched:
-                action = action.squeeze(0)              # (da,)
+                action = action.squeeze(0)              # (dim_action,)
 
         return action.cpu().numpy()
-
-    def evaluate_action(self, state, action):
-        """
-        Compute log-probability of given action under the actor's policy.
-        :param state: (ds,) or (B, ds)
-        :param action: (da,) or (B, da)
-        :return: log_prob tensor with shape (B,)
-        """
-        state_batched = self.ensure_batched(state)
-        action_batched = self.ensure_batched(action)
-        mean, std= self.forward(state_batched)
-        action_distribution = Independent(Normal(mean, std), 1)
-        log_prob = action_distribution.log_prob(action_batched)
-        return log_prob
-
-    def sample_action(self, state, sample_num):
-        """
-        Sample multiple actions per state from the current policy.
-        :param state: (ds,) or (B, ds)
-        :param sample_num: number of action samples per state (N)
-        :return: samples with shape (B, N, da)
-        """
-        with torch.no_grad():
-            state_batched = self.ensure_batched(state)
-            mean, std = self.forward(state_batched)
-            dist = Independent(Normal(mean,std), 1)
-            samples = dist.rsample((sample_num,)).permute(1, 0, 2)
-            
-        return samples, mean, std
 
 
     def ensure_batched(self,tensor):

@@ -1,12 +1,17 @@
 import gymnasium as gym
 import torch
 import numpy as np
-from .rollout_vector_env import collect_rollout_vec_env
 
 
 def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
     """
     Collect rollouts with the current policy and store them in the replay buffer.
+    Inputs:
+        -args: to determine the parameters for rollout
+        -actor: online actor
+        -replaybuffer: replaybuffer to store transitions
+        -device
+        -buffer_gpu: Flag whether replaybuffer is stored on the GPU or CPU
 
     Stores per transition:
       (state, action, next_state, reward, terminated, truncated)
@@ -14,9 +19,6 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
     Returns:
       total_steps_collected (int)
     """
-    if isinstance(env, gym.vector.AsyncVectorEnv):
-        return collect_rollout_vec_env(env, args, actor, replaybuffer, device, buffer_gpu)
-
     
     episodes_cpu = []  # only used when buffer_gpu == False
     total_steps_collected = 0
@@ -27,8 +29,6 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
             # Per-episode storage (always lists -> no branching in the step loop)
             states_list, acts_list, next_states_list = [], [], []
             rews_list, terminated_list, truncated_list = [], [], []
-            task_invert_list, vel_rew_list, pos_rew_list, progress_list = [], [], [],[]
-
 
             state, info = env.reset()
 
@@ -42,33 +42,12 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 next_state, reward, terminated, truncated, info = env.step(action)
                 total_steps_collected += 1
                 
-                # velocity rewards
-                task_invert = 0.0
-                vel_rew = 0.0
-                pos_rew = 0.0
-                progress = 0.0
-                if args.task_mode in ("inverted", "inverted_multi_task"):
-                    vel_rew = info['velocity_reward']
-                    task_invert = info['task_direction']
-                elif args.task_mode == "target_goal":
-                    progress = info["goal_progress"]
-                    vel_rew = info['velocity_reward']
-                    pos_rew = info["position_reward"] 
-               
-
+            
                 # Store transition parts
                 states_list.append(state)
                 acts_list.append(action)
                 next_states_list.append(next_state)
-                rews_list.append(reward)
-                terminated_list.append(terminated)
-                truncated_list.append(truncated)
-                task_invert_list.append(task_invert)
-                vel_rew_list.append(vel_rew)
-                pos_rew_list.append(pos_rew)
-                progress_list.append(progress)
-
-              
+                rews_list.append(reward)           
 
                 done = terminated or truncated
                 if done:
@@ -84,20 +63,16 @@ def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
                 rewards_np          = np.asarray(rews_list,        dtype=np.float32)
                 terminated_np       = np.asarray(terminated_list,  dtype=np.float32)
                 truncated_np        = np.asarray(truncated_list,   dtype=np.float32)
-                task_invert_np      = np.asarray(task_invert_list, dtype=np.float32)
-                vel_rew_np          = np.asarray(vel_rew_list,     dtype=np.float32) 
-                pos_rew_np          = np.asarray(pos_rew_list,     dtype=np.float32)
-                progress_np         = np.asarray(progress_list,    dtype = np.float32)
                     
                 replaybuffer.store_episode_stacked(
-                states_np, actions_np, next_states_np, rewards_np, terminated_np, truncated_np, task_invert_np, vel_rew_np, pos_rew_np, progress_np
+                states_np, actions_np, next_states_np, rewards_np, terminated_np, truncated_np
                 )
                 
             else:
                 # Build episode as list of tuples (CPU buffer)
             
                 episode = list(zip(
-                    states_list, acts_list, next_states_list, rews_list, terminated_list, truncated_list, task_invert_list, vel_rew_list, pos_rew_list, progress_list
+                    states_list, acts_list, next_states_list, rews_list, terminated_list, truncated_list
                     ))
                 
                 episodes_cpu.append(episode)

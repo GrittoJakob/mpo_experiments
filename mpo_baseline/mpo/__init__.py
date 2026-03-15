@@ -5,7 +5,7 @@ import torch.nn as nn
 from nets.actor import Actor
 from nets.critic import Critic
 
-from .critic_forward_pass import target_critic_forward_pass
+from .critic_forward_pass import shared_target_critic_forward_pass
 from .critic_update import critic_update_td
 from .expectation_step import expectation_step, compute_weights_temperature_loss
 from .maximization_step import maximization_step
@@ -104,12 +104,13 @@ class MPO(object):
         self.eta_mu = torch.full((self.action_dim,), args.init_eta_mu, device=self.device,dtype=torch.float32)
         self.eta_sigma = torch.full((self.action_dim,), args.init_eta_sigma, device=self.device, dtype=torch.float32)
 
+        # Bindings of functions
         self.expectation_step = types.MethodType(expectation_step, self)
         self.maximization_step = types.MethodType(maximization_step, self)
         self.critic_update_td = types.MethodType(critic_update_td, self)
         self.sample_actions_from_target_actor = types.MethodType(sample_actions_from_target_actor, self)
         self.compute_weights_temperature_loss = types.MethodType(compute_weights_temperature_loss, self)
-        self.target_critic_forward_pass = types.MethodType(target_critic_forward_pass, self)
+        self.shared_target_critic_forward_pass = types.MethodType(shared_target_critic_forward_pass, self)
 
 
     

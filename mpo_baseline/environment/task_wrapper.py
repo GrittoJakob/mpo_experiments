@@ -1,89 +1,12 @@
 import numpy as np
 import gymnasium as gym
 
-class InvertedVelocityWrapper(gym.Wrapper):
-    def __init__(self, env,  args):
-        super().__init__(env)
-        self.invert = 1.0
-        self.backward_prob = 0.5 
-        self.healthy_reward_weight = args.healthy_reward_weight
-        self.vel_scale = args.velocity_reward_scale
-        self.scale_wrong_direction = args.scale_wrong_direction_reward
-        
-        
-        # NEW: Curriculum Speed Limit
-        self.current_max_speed = float('inf') 
-
-        # CRITICAL FIX FOR HALF-CHEETAH / ANT:
-        # We must expand the observation space by 1 to hold the "Task Hint"
-        # (The +1.0 or -1.0 value that tells the agent which way to go initially)
-        low = np.append(env.observation_space.low, -float('inf'))
-        high = np.append(env.observation_space.high, float('inf'))
-        self.observation_space = gym.spaces.Box(low, high, dtype=np.float64)
-
-    def update_speed_range(self, min_speed, max_speed):
-        """Called by the curriculum loop to ramp up difficulty."""
-        self.current_max_speed = float(max_speed)
-
-    def set_backward_prob(self, prob):
-        self.backward_prob = float(prob)
-
-    def reset(self, seed=None, options=None):
-        # 1. EVALUATION OVERRIDE
-        if options and 'task_mode' in options:
-            self.invert = float(options['task_mode'])
-            
-        # 2. TRAINING AUTO-SAMPLE (Randomize every episode for single-episode adaptation)
-        else:
-            is_backward = np.random.random() < self.backward_prob
-            self.invert = -1.0 if is_backward else 1.0
-            
-        obs, info = self.env.reset(seed=seed, options=options)
-        
-        # Inject Hint
-        obs = self._add_hint(obs)
-        
-        # Add telemetry
-        info['task_direction'] = self.invert
-        return obs, info
-    
-    def step(self, action):
-        obs, rewards, terminated, truncated, info = self.env.step(action)
-        
-        # Inject Hint
-        obs = self._add_hint(obs)        
-        assert ("reward_forward" in info) or ("forward_reward" in info), info.keys()
-
-        reward_forward = info.get("reward_forward", info.get("forward_reward", 0.0))
-        others = rewards - reward_forward
-
-        # --- 1. CALCULATE TASK REWARD ---
-        flipped_forward_rew = reward_forward * self.invert * self.vel_scale
-        if flipped_forward_rew < 0:
-            flipped_forward_rew *= self.scale_wrong_direction
-       
-        
-        # --- 3. TOTAL ---
-        # Added 'healthy_reward' to the sum (it was missing in your snippet)
-        total_reward = others + flipped_forward_rew
-        
-        # Telemetry
-        info['velocity_reward'] = flipped_forward_rew
-        info['task_direction'] = self.invert
-        
-        return obs, total_reward, terminated, truncated, info
-
-    def _add_hint(self, obs):
-        """Appends the target direction (+1 or -1) to the observation vector."""
-        return np.append(obs, self.invert)
-
-
 class GoalPositionWrapper(gym.Wrapper):
     """
-    Multitask: Ant soll zu einer (x,y)-Zielposition laufen.
-    - Ersetzt reward_forward durch Velocity-in-Goal-Richtung
-    - Optionaler zusätzlicher Positions-/Progress-Reward
-    - Fügt Hint zur Observation hinzu: (dir_x, dir_y, dist)
+    Multitask: Ant should move to a target position (x, y).
+    - Replaces reward_forward with velocity in the direction of the goal
+    - Optional additional position/progress reward
+    - Adds a hint to the observation: (dir_x, dir_y, dist)
     """
     def __init__(self, env, args):
         super().__init__(env)
@@ -93,10 +16,6 @@ class GoalPositionWrapper(gym.Wrapper):
         self.pos_scale = args.position_reward_scale
         self.scale_wrong_direction = args.scale_wrong_direction_reward
         self.maximum_area = args.maximum_area
-
-        # Task sampling
-        # self.goal_list = self.make_goal_list(args)  # i.e. [(5,0),(-5,0),(0,5),(0,-5)]
-        #self.goal_radius = args.goal_radius
         self.success_radius = args.success_radius
 
         # Internal state
@@ -113,7 +32,6 @@ class GoalPositionWrapper(gym.Wrapper):
         
         x_goal = x = np.random.uniform(-max_area, max_area)
         y_goal = x = np.random.uniform(-max_area, max_area)
-        #print(x_goal, y_goal)
         return np.array([x_goal, y_goal], dtype=np.float64)
 
     def _get_xy_from_info(self, info):
@@ -122,7 +40,6 @@ class GoalPositionWrapper(gym.Wrapper):
     def _dt(self):      
         dt = getattr(self.env.unwrapped, "dt", None)
         if dt is None:
-
             dt = 0.05
         return float(dt)
 
@@ -136,17 +53,21 @@ class GoalPositionWrapper(gym.Wrapper):
         return np.array([dir_vec[0], dir_vec[1], dist], dtype=np.float64)
 
     def reset(self, seed=None, options=None):
+        
+        # Check for options in env reset
         options_env = dict(options) if options else None
         target_goal = None
         if options_env and "target_goal" in options_env:
             target_goal = options_env.pop("target_goal")
         obs, info = self.env.reset(seed=seed, options=options_env)
 
+        # Check existing target goal
         if target_goal is not None:
             self.goal = np.array(target_goal, dtype=np.float64)
         else:
             self.goal = self._sample_goal()
 
+        # Get info of position
         xy_pos= self._get_xy_from_info(info)
         self.prev_xy_pos = xy_pos.copy()
 

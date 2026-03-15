@@ -9,6 +9,7 @@ class Critic(nn.Module):
     This critic takes as input a state and an action, concatenates them,
     and outputs a single scalar Q-value per batch element.
     """
+
     def __init__(self, args):
 
         """
@@ -18,31 +19,31 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         # Dimensions
-        self.ds = args.obs_space
-        self.da = args.action_dim
-        self.hs = args.hidden_size_critic
+        self.dim_states = args.obs_space
+        self.dim_action = args.action_dim
+        self.hidden_size = args.hidden_size_critic
 
         # Simple MLP over concatenated [state, action]
         self.net = nn.Sequential(
-            nn.Linear(self.ds + self.da, self.hs),
-            nn.LayerNorm(self.hs),
+            nn.Linear(self.dim_states + self.dim_action, self.hidden_size),
+            nn.LayerNorm(self.hidden_size),
             nn.Tanh(),
-            nn.Linear(self.hs, self.hs),
+            nn.Linear(self.hidden_size, self.hidden_size),
             nn.ELU(),
-            nn.Linear(self.hs, 1)
+            nn.Linear(self.hidden_size, 1)
         )
    
     def forward(self, state, action):
         """
         Forward pass of the critic network.
 
-        :param state:  Tensor of shape (B, ds)
-        :param action: Tensor of shape (B, da)
+        :param state:  Tensor of shape (B, dim_states)
+        :param action: Tensor of shape (B, dim_action)
         :return: Q-values with shape (B, 1)
         """
 
         # Concatenate state and action along the feature dimension
-        h = torch.cat([state, action], dim=1)  # (B, ds+da)
+        h = torch.cat([state, action], dim=1)  # (B, dim_states+dim_action)
 
         # Pass through the network
         Q = self.net(h)     #(B,1)

@@ -64,27 +64,7 @@ def train_loop(
 
     num_steps = 0
     it = 1
-    grad_updates = 0
-    
-
-    @dataclass
-    class Runtime: 
-        rollout: float = 0.0
-        E_step: float = 0.0
-        M_step: float = 0.0
-        Critic_update: float = 0.0
-        Eval: float = 0.0
-        Sample_from_buffer: float = 0.0
-        Sample_actions: float = 0.0
-        target_critic_forward: float = 0.0
-        
-    
-  
-   
-    best_video_reward = 0.0
-
-    print(f"[DEBUG] start with number of steps = {len(replaybuffer)}, maximal number of environment steps: {args.max_training_steps}")       
-
+    grad_updates = 0 
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
@@ -94,32 +74,15 @@ def train_loop(
     
     # Main training iterations
     pbar = tqdm(total=args.max_training_steps, desc="Env steps")
- 
-    next_save_step = ((num_steps // args.save_every_env_steps) + 1) * args.save_every_env_steps
     while num_steps < args.max_training_steps:
 
         # Collect fresh experience for this iteration
-        t_env_start = time.perf_counter()
         new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device, gpu_buffer)
 
         #Update current steps for while loop
         num_steps += new_steps
 
-        while num_steps >= next_save_step:
-            mpo.actor.eval()
-            mpo.critic.eval()
-            with torch.no_grad():
-                # IMPORTANT: pass next_save_step so filename/payload uses exactly 1M/2M/...
-                save_actor_critic(
-                    mpo, args,
-                    num_steps=next_save_step,
-                    grad_updates=grad_updates,
-                    out_dir="checkpoints"
-                )
-            mpo.actor.train()
-            mpo.critic.train()
-            next_save_step += args.save_every_env_steps
-        
+        # Capture Video        
         if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
             trajectory, video_reward =  log_one_episode_video(args, mpo.actor, device, prefix, num_steps)
@@ -133,68 +96,43 @@ def train_loop(
                     name=f"best_video_traj_{prefix}",
                 )
 
-
-
         # For terminal logging
         pbar.update(new_steps)
 
-        # Logging runtime env end
-        t_env_end = time.perf_counter()
-        Runtime.rollout += t_env_end - t_env_start
-
+        # Number of updates dependant from UTD ratio and collected steps during rollout
         num_updates_per_iter = math.ceil(
-        args.UTD_ratio * new_steps
-        )
-
+            args.UTD_ratio * new_steps
+            )
 
         # Perform several updates per iteration (UTD ratio)
         for i_update in range(num_updates_per_iter):
-            # if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
-            #     torch.compiler.cudagraph_mark_step_begin()
             grad_updates += 1
-            
-            buffer_size= len(replaybuffer)
 
             # Sample mini batch from buffer
-            sample_mbatch_start = time.time()
             state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch = sample_minibatch(
                 replaybuffer=replaybuffer,
                 batch_size=args.batch_size,
                 device=device,
                 gpu_buffer=gpu_buffer,
             )
-            
-            #Check for correct shapes
-            if (grad_updates-1) % 10000 == 0:
-                assert_batch_shapes(state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch,
-                        args.batch_size, mpo.state_dim, mpo.action_dim)
-            sample_mbatch_end = time.time()
-            Runtime.Sample_from_buffer += sample_mbatch_end - sample_mbatch_start
 
             # Compute target_actor forward pass to get sampled_actions an b_mu, b_st
             # all_sampled_actions: sampled actions for timestep t and t+1 concatenated
             # sampled actions: sampled actions only for timestep t
-            sample_action_start= time.time()
             all_sampled_actions, sampled_actions, mu_off, std_off = mpo.sample_actions_from_target_actor(
                 state_batch= state_batch,
                 next_state_batch= next_state_batch,
                 sample_num= args.sample_action_num
             )
-            sample_action_end = time.time()
-            Runtime.Sample_actions += sample_action_end - sample_action_start
 
             # Compute forward pass of target critic for state_batch and next_state_batch
-            t_critic_forward_start = time.time()
-            target_q, next_target_q = mpo.target_critic_forward_pass(
+            target_q, next_target_q = mpo.shared_target_critic_forward_pass(
                 state_batch=state_batch,
                 next_state_batch= next_state_batch,
                 all_sampled_actions = all_sampled_actions
             )
-            t_critic_forward_end = time.time()
-            Runtime.target_critic_forward += t_critic_forward_end - t_critic_forward_start
 
             # Policy evaluation (critic update)
-            t_policy_eval_start = time.perf_counter()
             collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0)
             critic_update_stats = mpo.critic_update_td( 
                 next_target_q = next_target_q,
@@ -206,25 +144,17 @@ def train_loop(
                 collect_stats= collect_stats
                 )
 
-            t_policy_eval_end = time.perf_counter()    
-            Runtime.Critic_update += t_policy_eval_end - t_policy_eval_start
-
-
+            # Delay policy updates for better stability by training the critic more often
             if (i_update % args.delay_policy_update == 0):
                 
                 # E-step (build non-parametric target distribution)
-                t_E_step_start = time.perf_counter()
                 norm_target_q, stats_e_step = mpo.expectation_step(
                     target_q= target_q,
                     sampled_actions=sampled_actions, 
                     collect_stats = collect_stats
                     )
-                
-                t_E_step_end = time.perf_counter()         
-                Runtime.E_step += t_E_step_end - t_E_step_start
 
                 # M-step (actor / policy update)
-                t_M_step_start = time.perf_counter()
                 stats_m_step = mpo.maximization_step(
                     state_batch=state_batch,
                     norm_target_q = norm_target_q, 
@@ -232,8 +162,6 @@ def train_loop(
                     mu_off = mu_off, 
                     std_off = std_off,
                     collect_stats= collect_stats)
-                t_M_step_end = time.perf_counter()
-                Runtime.M_step += t_M_step_end - t_M_step_start
 
 
             # logging 
@@ -241,8 +169,7 @@ def train_loop(
                 logging_wandb(
                     writer = writer,
                     args = args,
-                    replaybuffer = replaybuffer,
-                    Runtime = Runtime, 
+                    replaybuffer = replaybuffer, 
                     stats_m_step = stats_m_step,
                     stats_e_step = stats_e_step,
                     critic_update_stats = critic_update_stats,
@@ -257,24 +184,18 @@ def train_loop(
                 mpo.update_target_actor_critic()
 
 
-        # Evaluation in the outer loop
+        # Evaluation
         if it % args.evaluate_period == 0:
-            
-            t_eval_start = time.perf_counter()
 
             # Evaluate current policy without gradient tracking
             mpo.actor.eval()
             evaluate(args, mpo.actor, eval_env, writer, device, num_steps)
             mpo.actor.train()
-            t_eval_end = time.perf_counter()
-            Runtime.Eval += t_eval_end -t_eval_start 
 
-        # if it % args.save_every == 0:
-        #     mpo.save(it)
-
-        it += 1  
-        # Increase global update counter after each gradient update    
+        # Update iteration counter
+        it += 1    
     
+    # Save the actor and critic after training
     mpo.actor.eval()
     mpo.critic.eval()
     with torch.no_grad():

@@ -37,7 +37,7 @@ class Args:
     """store replay_buffer on cuda"""
     num_envs: int = 4
     asynchronous: bool = True
-    ckpt_path = "/home/jakob_gritto/tum-adlr-ws26-09/mpo_baseline/checkpoints/Final_run_target_goal_for_poster.pt"
+   
     
 
     # ===============================

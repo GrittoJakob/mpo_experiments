@@ -15,12 +15,12 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     # Current actor parameters for this batch of states
     mu_on, std_on = self.actor.forward(state_batch)      
 
-    logp1 = logp_diag_normal(sampled_actions, mu_on, std_off, include_log_std=False)
-    logp2 = logp_diag_normal(sampled_actions, mu_off, std_on, include_log_std=True)
-    # pi_1 = Independent(Normal(mu_on, std_off), 1)
-    # pi_2 = Independent(Normal(mu_off, std_on), 1)
-    # logp1 = pi_1.log_prob(sampled_actions)
-    # logp2 = pi_2.log_prob(sampled_actions)
+    # Build both Distributions:
+    # Here we use the decoupled version of the Paper: arXiv:1812.02256v1  [cs.LG]  5 Dec 2018
+    pi_1 = Independent(Normal(mu_on, std_off), 1)
+    pi_2 = Independent(Normal(mu_off, std_on), 1)
+    logp1 = pi_1.log_prob(sampled_actions)
+    logp2 = pi_2.log_prob(sampled_actions)
 
     # Weighted policy improvement objective
     weighted_logp = (norm_target_q * (logp1 + logp2)) 
@@ -58,41 +58,16 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
         # LOGGING STATS 
         C_mu_mean    = C_mu_dim.mean().detach()
         C_sigma_mean = C_sigma_dim.mean().detach()
-
-        eta_mu_mean    = self.eta_mu.mean().detach()
-        eta_mu_min     = self.eta_mu.min().detach()
-        eta_mu_max     = self.eta_mu.max().detach()
-        eta_sigma_mean = self.eta_sigma.mean().detach()
-        eta_sigma_min  = self.eta_sigma.min().detach()
-        eta_sigma_max  = self.eta_sigma.max().detach()
         std_mean       = std_on.mean().detach()
         mu_mean        = mu_on.mean().detach()
-        std_dim_mean = std_on.mean(dim=(0, 1))   # -> [A]
-        mu_dim_mean  = mu_on.mean(dim=(0, 1))    # -> [A]  
-        std_min = std_dim_mean.min().detach()
-        std_max = std_dim_mean.max().detach()
-
-        mu_min = mu_dim_mean.min().detach()
-        mu_max = mu_dim_mean.max().detach()
-
 
         stats = {
             "loss_p":        self.loss_p.detach(),
             "loss_l":        self.loss_l.detach(),
             "C_mu_mean":     C_mu_mean,
             "C_sigma_mean":  C_sigma_mean,
-            "eta_mu_mean":   eta_mu_mean,
-            "eta_mu_min":    eta_mu_min,
-            "eta_mu_max":    eta_mu_max,
-            "eta_sigma_mean":eta_sigma_mean,
-            "eta_sigma_min": eta_sigma_min,
-            "eta_sigma_max": eta_sigma_max,
             "std_mean":      std_mean,
             "mu_mean":       mu_mean,
-            "mu_max":        mu_max,
-            "mu_min":        mu_min,
-            "std_max":       std_max,
-            "std_min":       std_min,
         }
     else:
         stats = None
@@ -100,21 +75,3 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     return stats
 
     
-def logp_diag_normal(actions, mean, std, include_log_std: bool):
-    """
-    actions: [N, B, A]
-    mean/std: [B, A]  (broadcast über N)
-    returns: [N, B]
-    """
-    # numerical stability
-    std = std.clamp_min(1e-8)
-
-    inv_std = std.reciprocal()                 # [B, A]
-    z = (actions - mean) * inv_std             # broadcast -> [N, B, A]
-    log_prob = -0.5 * (z * z).sum(dim=-1)            # [N, B]
-
-    if include_log_std:
-        log_prob = log_prob - std.log().sum(dim=-1)        # [B] broadcast -> [N, B]
-
-    # Konstante -0.5*A*log(2pi) weggelassen (ändert Gradienten nicht)
-    return log_prob
