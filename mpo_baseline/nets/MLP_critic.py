@@ -19,7 +19,7 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         # Dimensions
-        self.dim_states = args.obs_space
+        self.dim_states = args.obs_dim
         self.dim_action = args.action_dim
         self.hidden_size = args.hidden_size_critic
 

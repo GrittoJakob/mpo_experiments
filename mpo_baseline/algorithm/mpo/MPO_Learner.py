@@ -31,7 +31,6 @@ def train_loop(
         replaybuffer: ReplayBuffer,
         mpo: MPO,
         writer: SummaryWriter,
-        gpu_buffer: bool = False
         ):
     """
     Main training loop for MPO.
@@ -41,13 +40,14 @@ def train_loop(
     - Periodically evaluates and logs statistics.
     """
 
+    state, _ = train_env.reset()
     num_steps = 0
     it = 1
     grad_updates = 0 
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
-        new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device, gpu_buffer)
+        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer)
         num_steps += new_steps
 
     
@@ -56,7 +56,7 @@ def train_loop(
     while num_steps < args.max_training_steps:
 
         # Collect fresh experience for this iteration
-        new_steps = collect_rollout(train_env, args, mpo.actor, replaybuffer, device, gpu_buffer)
+        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer)
 
         #Update current steps for while loop
         num_steps += new_steps
@@ -88,26 +88,28 @@ def train_loop(
             grad_updates += 1
 
             # Sample mini batch from buffer
-            state_batch, action_batch, next_state_batch, reward_batch, terminated_batch, truncated_batch = sample_minibatch(
-                replaybuffer=replaybuffer,
-                batch_size=args.batch_size,
-                device=device,
-                gpu_buffer=gpu_buffer,
-            )
+            batch = replaybuffer.sample_batch(args.batch_size)
+            obs_batch = batch["obs"]
+            next_obs_batch = batch["next_obs"]
+            actions_batch = batch["actions"]
+            rewards_batch = batch["rewards"]
+            truncated_batch = batch["truncated"]
+            terminated_batch = batch["terminated"]
+
 
             # Compute target_actor forward pass to get sampled_actions an b_mu, b_st
             # all_sampled_actions: sampled actions for timestep t and t+1 concatenated
             # sampled actions: sampled actions only for timestep t
             all_sampled_actions, sampled_actions, mu_off, std_off = mpo.sample_actions_from_target_actor(
-                state_batch= state_batch,
-                next_state_batch= next_state_batch,
+                state_batch= obs_batch,
+                next_state_batch= next_obs_batch,
                 sample_num= args.sample_action_num
             )
 
             # Compute forward pass of target critic for state_batch and next_state_batch
             target_q, next_target_q = mpo.shared_target_critic_forward_pass(
-                state_batch=state_batch,
-                next_state_batch= next_state_batch,
+                state_batch = obs_batch,
+                next_state_batch= next_obs_batch,
                 all_sampled_actions = all_sampled_actions
             )
 
@@ -115,9 +117,9 @@ def train_loop(
             collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0)
             critic_update_stats = mpo.critic_update_td( 
                 next_target_q = next_target_q,
-                state_batch =state_batch, 
-                action_batch =action_batch, 
-                reward_batch= reward_batch, 
+                state_batch = obs_batch, 
+                action_batch =actions_batch, 
+                reward_batch= rewards_batch, 
                 terminated_batch = terminated_batch,
                 truncated_batch= truncated_batch,
                 collect_stats= collect_stats
@@ -135,7 +137,7 @@ def train_loop(
 
                 # M-step (actor / policy update)
                 stats_m_step = mpo.maximization_step(
-                    state_batch=state_batch,
+                    state_batch= obs_batch,
                     norm_target_q = norm_target_q, 
                     sampled_actions = sampled_actions, 
                     mu_off = mu_off, 

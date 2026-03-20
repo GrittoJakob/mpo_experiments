@@ -1,10 +1,11 @@
 import os
-os.environ["OMP_NUM_THREADS"] = str(4)
-os.environ["OPENBLAS_NUM_THREADS"] = str(4)
-os.environ["MKL_NUM_THREADS"] = str(4)
-os.environ["NUMEXPR_NUM_THREADS"] = str(4)
-os.environ["MAX_JOBS"] = "16" #for torch compile
-os.environ["TORCH_LOGS"] = "+recompiles, +graph_breaks"
+_DEFAULT_THREADS = "4"
+os.environ["OMP_NUM_THREADS"] = _DEFAULT_THREADS
+os.environ["OPENBLAS_NUM_THREADS"] = _DEFAULT_THREADS
+os.environ["MKL_NUM_THREADS"] = _DEFAULT_THREADS
+os.environ["NUMEXPR_NUM_THREADS"] = _DEFAULT_THREADS
+os.environ["MAX_JOBS"] = "16"
+os.environ["TORCH_LOGS"] = "+recompiles,+graph_breaks"
 os.environ["TORCH_COMPILE_DEBUG"] = "1"
 
 import time
@@ -20,7 +21,7 @@ import wandb
 from mpo_baseline.nets.MLP_actor import Actor
 from mpo_baseline.nets.MLP_critic import Critic
 from typing import Optional
-from environment.env_creator import limit_threads, make_train_env, make_eval_env, make_train_vec_env
+from environment.env_creator import limit_threads, make_eval_env, make_train_vec_env
 from buffer.replaybuffer import ReplayBuffer
 from buffer.replaybuffer_gpu import ReplayBufferGPU
 from .configs.Ant_v5 import Args
@@ -31,32 +32,24 @@ from helpers.warm_up_compilation import warmup_mpo_compile
 from mpo.__init__ import MPO
 
 def make_envs(args, run_name):
-    if args.num_envs > 1:
-        train_env = make_train_vec_env(
-            args,
-            args.env_id,
-            args.seed,
-            args.num_envs,
-            args.asynchronous,
-            args.num_threads
-        )
-    else:
-        train_env = make_train_env(args, args.env_id, args.seed)
+    train_env = make_train_vec_env(
+        args,
+        args.env_id,
+        args.seed,
+        args.num_envs,
+    )
     
     eval_env = make_eval_env(args, args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
-    if isinstance(train_env, gym.vector.VectorEnv):
-        args.obs_space   = int(np.prod(train_env.single_observation_space.shape))
-        args.action_dim  = int(np.prod(train_env.single_action_space.shape))
-    else:
-        args.obs_space   = int(np.prod(train_env.observation_space.shape))
-        args.action_dim  = int(np.prod(train_env.action_space.shape))
+
+    args.obs_dim   = int(np.prod(train_env.single_observation_space.shape))
+    args.action_dim  = int(np.prod(train_env.single_action_space.shape))
+    
     return train_env, eval_env
 
 def init_runname(args):
      # Run-Name à la CleanRL
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     return run_name
-    
 
 def make_networks(args, device):
     
@@ -74,12 +67,11 @@ def make_optimizer(args, actor, critic):
 
 def train():
     args = tyro.cli(Args)
-    limit_threads(args.num_threads)
+    limit_threads(_DEFAULT_THREADS)
     
     # Device
     device = torch.device("cuda" if (args.device == "cuda" and torch.cuda.is_available()) else "cpu")
     print("Device: ", device)
-
 
     # Run-Name 
     run_name = init_runname(args)
@@ -102,12 +94,10 @@ def train():
         torch.cuda.manual_seed_all(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False    
-    train_env.reset(seed=args.seed)  
+    train_env.reset()  
 
     # Create Networks
     actor, critic, target_actor, target_critic = make_networks(args, device)
-
-
 
     # Create Optimizer
     actor_optimizer, critic_optimizer = make_optimizer(args, actor, critic)

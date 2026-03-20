@@ -3,83 +3,82 @@ import torch
 import numpy as np
 
 
-def collect_rollout(env, args, actor, replaybuffer, device, buffer_gpu):
+def collect_rollout(env, state, args, actor, replaybuffer):
     """
-    Collect rollouts with the current policy and store them in the replay buffer.
-    Inputs:
-        -args: to determine the parameters for rollout
-        -actor: online actor
-        -replaybuffer: replaybuffer to store transitions
-        -device
-        -buffer_gpu: Flag whether replaybuffer is stored on the GPU or CPU
+    Collect rollout steps with the current policy and store them in the replay buffer.
 
     Stores per transition:
-      (state, action, next_state, reward, terminated, truncated)
+        (obs, action, next_obs, reward, terminated, truncated)
 
     Returns:
-      total_steps_collected (int)
+        next_state: latest env state after rollout
+        total_steps_collected: number of collected environment steps
     """
-    
-    episodes_cpu = []  # only used when buffer_gpu == False
+
+    num_envs = env.num_envs
+    T = args.sample_steps_per_iter
     total_steps_collected = 0
+
+    obs_buf = np.empty((T, num_envs, args.obs_dim), dtype=np.float32)
+    actions_buf = np.empty((T, num_envs, args.action_dim), dtype=np.float32)
+    next_obs_buf = np.empty((T, num_envs, args.obs_dim), dtype=np.float32)
+    rewards_buf = np.empty((T, num_envs), dtype=np.float32)
+    terminated_buf = np.empty((T, num_envs), dtype=np.float32)
+    truncated_buf = np.empty((T, num_envs), dtype=np.float32)
     actor.eval()
-
+    
     with torch.no_grad():
-        while total_steps_collected < args.sample_steps_per_iter:
-            # Per-episode storage (always lists -> no branching in the step loop)
-            states_list, acts_list, next_states_list = [], [], []
-            rews_list, terminated_list, truncated_list = [], [], []
+        
+        for step in range(args.sample_steps_per_iter):
+        
+            # Convert state from numpy to tensor for forward pass
+            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
 
-            state, info = env.reset()
+            actions = actor.action(state_tensor)  # action is numpy 
 
-            for _ in range(args.sample_episode_maxstep):
-                state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
-
-                action = actor.action(state_tensor)  # numpy
-                if args.use_action_clipping:
-                    action = np.clip(action, args.action_space_low, args.action_space_high)
-
-                next_state, reward, terminated, truncated, info = env.step(action)
-                total_steps_collected += 1
-                
+            # Step
+            next_states, rewards, terminated, truncated, infos = env.step(actions)
             
-                # Store transition parts
-                states_list.append(state)
-                acts_list.append(action)
-                next_states_list.append(next_state)
-                rews_list.append(reward)           
+            # Handle dones and final observation for async vector env:
+            # If terminated or truncated: get next_obs from final_observations
+            done_mask = np.logical_or(terminated, truncated)
 
-                done = terminated or truncated
-                if done:
-                    break
+            # Copy next_states for next step
+            real_next_obs = next_states.copy()
 
-                state = next_state
+            if "final_observation" in infos:
+                for idx_env, done in enumerate(done_mask):
+                    if done:
+                        real_next_obs[idx_env] = infos["final_observation"][idx_env] 
 
-            # Episode finished -> store once, depending on buffer type
-            if buffer_gpu:
-                states_np           = np.asarray(states_list,      dtype=np.float32)
-                actions_np          = np.asarray(acts_list,        dtype=np.float32)
-                next_states_np      = np.asarray(next_states_list, dtype=np.float32)
-                rewards_np          = np.asarray(rews_list,        dtype=np.float32)
-                terminated_np       = np.asarray(terminated_list,  dtype=np.float32)
-                truncated_np        = np.asarray(truncated_list,   dtype=np.float32)
-                    
-                replaybuffer.store_episode_stacked(
-                states_np, actions_np, next_states_np, rewards_np, terminated_np, truncated_np
-                )
-                
-            else:
-                # Build episode as list of tuples (CPU buffer)
+
+            obs_buf[step] = state
+            actions_buf[step] = actions
+            next_obs_buf[step] = real_next_obs
+            rewards_buf[step] = rewards
+            terminated_buf[step] = terminated.astype(np.float32)
+            truncated_buf[step] = truncated.astype(np.float32)
             
-                episode = list(zip(
-                    states_list, acts_list, next_states_list, rews_list, terminated_list, truncated_list
-                    ))
-                
-                episodes_cpu.append(episode)
+            state = next_states
+            total_steps_collected += num_envs
 
     actor.train()
 
-    if not buffer_gpu:
-        replaybuffer.store_episodes(episodes_cpu)
+    # Flatten for Buffer
+    obs_flat = obs_buf.reshape(T * num_envs, args.obs_dim)
+    actions_flat = actions_buf.reshape(T * num_envs, args.action_dim)
+    next_obs_flat = next_obs_buf.reshape(T * num_envs, args.obs_dim)
+    rewards_flat = rewards_buf.reshape(T * num_envs, 1)
+    truncated_flat = truncated_buf.reshape(T * num_envs, 1)
+    terminated_flat = terminated_buf.reshape(T * num_envs, 1)
 
-    return total_steps_collected
+    replaybuffer.add_batch(
+        obs = obs_flat,
+        actions = actions_flat,
+        next_obs = next_obs_flat,
+        rewards = rewards_flat,
+        terminated = terminated_flat,
+        truncated = truncated_flat
+    )
+
+    return state, total_steps_collected

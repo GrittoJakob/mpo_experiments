@@ -13,7 +13,7 @@ def init_writer(args):
         save_code=True,
     )
     wandb.define_metric("grad_updates")
-    wandb.define_metric("video", step_metric="grad_upates")
+    wandb.define_metric("video", step_metric="grad_updates")
 
 
     writer = SummaryWriter(f"runs/{args.run_name}")

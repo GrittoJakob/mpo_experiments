@@ -9,7 +9,7 @@ class Actor(nn.Module):
     
     def __init__(self, args):
         super(Actor, self).__init__()
-        self.dim_states = args.obs_space
+        self.dim_states = args.obs_dim
         self.dim_action = args.action_dim
         self.hidden_size= args.hidden_size_actor
         self._printed_init_cov = False
