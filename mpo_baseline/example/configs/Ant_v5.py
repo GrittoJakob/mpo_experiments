@@ -21,12 +21,10 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "fsandco"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 200
     "number of global updates per log to wandb"
-    num_threads: int = 16
-    """number of threads to use"""
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
     log_videos_period: int = 75
@@ -77,7 +75,7 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_replay_buffer: int = 800000
+    max_buffer_capacity: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""

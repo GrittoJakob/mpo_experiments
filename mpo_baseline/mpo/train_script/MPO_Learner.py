@@ -11,7 +11,7 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
-from mpo.__init__ import MPO
+from algorithm.__init__ import MPO
 from buffer.replaybuffer import ReplayBuffer
 from runners.rollout import collect_rollout
 from runners.video_rollout import log_one_episode_video
@@ -23,7 +23,7 @@ from helpers.save_model import save_actor_critic
 
 
 
-def train_loop(
+def MPO_Learner(
         args, 
         train_env, 
         eval_env,

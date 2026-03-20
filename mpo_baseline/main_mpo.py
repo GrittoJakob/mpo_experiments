@@ -18,18 +18,15 @@ import copy
 from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 import wandb
-from mpo_baseline.nets.MLP_actor import Actor
-from mpo_baseline.nets.MLP_critic import Critic
-from typing import Optional
-from environment.env_creator import limit_threads, make_eval_env, make_train_vec_env
-from buffer.replaybuffer import ReplayBuffer
-from buffer.replaybuffer_gpu import ReplayBufferGPU
-from .configs.Ant_v5 import Args
-from writer.init_writer import init_writer
-from mpo_baseline.algorithm.mpo.MPO_Learner import train_loop
-from helpers.warm_up_compilation import warmup_mpo_compile
-
-from mpo.__init__ import MPO
+from .nets.MLP_actor import Actor
+from .nets.MLP_critic import Critic
+from .environment.env_creator import limit_threads, make_eval_env, make_train_vec_env
+from .buffer.replaybuffer import ReplayBuffer
+from .example.configs.Ant_v5 import Args
+from .writer.init_writer import init_writer
+from .mpo.algorithm.__init__ import MPO
+from .mpo.train_script.MPO_Learner import MPO_Learner
+from .helpers.warm_up_compilation import warmup_mpo_compile
 
 def make_envs(args, run_name):
     train_env = make_train_vec_env(
@@ -104,17 +101,14 @@ def train():
 
     # Create ReplayBuffer
     if args.buffer_on_cuda and (args.device == "cuda" and torch.cuda.is_available()):
-        replaybuffer = ReplayBufferGPU(args.max_replay_buffer, device = "cuda")
-        gpu_buffer = True
-    else:
-        replaybuffer = ReplayBuffer(args.max_replay_buffer)
-        gpu_buffer = False
+        device_buffer = "cuda"
+    else: 
+        device_buffer = "cpu"
 
-    # action space
-    action_space = eval_env.unwrapped.action_space
-    args.action_space_low  = action_space.low
-    args.action_space_high = action_space.high
-    print("action space:", args.action_space_low, args.action_space_high)
+    replaybuffer = ReplayBuffer(args.max_buffer_capacity, args.obs_dim, args.action_dim, device_buffer)
+
+
+   
     mpo = MPO(args, eval_env, actor, target_actor, critic, target_critic, actor_optimizer, critic_optimizer, device) 
     
     #  compile warmup 

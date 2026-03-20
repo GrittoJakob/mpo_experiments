@@ -100,7 +100,7 @@ class ReplayBuffer:
     def __len__(self):
         return self.size
     
-def mean_reward(self):
-    if self.size == 0:
-        return 0.0
-    return self.rewards[:self.size].mean()
+    def mean_reward(self):
+        if self.size == 0:
+            return 0.0
+        return self.rewards[:self.size].mean()

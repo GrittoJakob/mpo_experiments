@@ -10,7 +10,7 @@ from .expectation_step import expectation_step, compute_weights_temperature_loss
 from .maximization_step import maximization_step
 
 
-class MPO(object):
+class MPO_Optimizer(object):
     def __init__(
             self, 
             args, 
@@ -49,7 +49,7 @@ class MPO(object):
         self.critic_optimizer =  critic_optimizer
 
         # Environment & basic dimensions
-        self.state_dim = args.obs_space
+        self.state_dim = args.obs_dim
         self.action_dim = args.action_dim
 
         # Device used for tensors / networks (CPU or GPU)
