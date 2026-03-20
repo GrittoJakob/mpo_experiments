@@ -11,16 +11,15 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
-from nets.actor import Actor
-from nets.critic import Critic
 from mpo.__init__ import MPO
 from buffer.replaybuffer import ReplayBuffer
 from rollout.rollout import collect_rollout
 from rollout.video_rollout import log_one_episode_video
-from train_mpo.evaluation import evaluate
-from helpers.sample_minibatch import sample_minibatch, assert_batch_shapes
+from mpo_baseline.runners.evaluation import evaluate
+from mpo_baseline.buffer.sample_minibatch import sample_minibatch, assert_batch_shapes
 from helpers.store_trajectory import store_trajectory
-from helpers.logging import logging_wandb
+from mpo_baseline.writer.logging import logging_wandb
+from helpers.save_model import save_actor_critic
 
 
 
@@ -203,31 +202,4 @@ def train_loop(
     mpo.actor.train()
     mpo.critic.train()
     pbar.close()
-
-def save_actor_critic(mpo, args, num_steps: int, grad_updates: int, out_dir: str = "checkpoints"):
-    """
-    Speichert Actor + Critic gemeinsam (atomar) in einer .pt-Datei.
-    Erwartet mpo.actor und mpo.critic.
-    """
-    os.makedirs(out_dir, exist_ok=True)
-
-    payload = {
-        "actor_state_dict": mpo.actor.state_dict(),
-        "critic_state_dict": mpo.critic.state_dict(),
-        "num_steps": int(num_steps),
-        "grad_updates": int(grad_updates),
-        "run_name": getattr(args, "run_name", None),
-        "timestamp": time.strftime("%Y%m%d-%H%M%S"),
-        "args": vars(args) if hasattr(args, "__dict__") else None,
-    }
-
-    filename = f"{payload['run_name'] or 'run'}_ac_steps{num_steps}_gu{grad_updates}.pt"
-    final_path = os.path.join(out_dir, filename)
-    tmp_path = final_path + ".tmp"
-
-    torch.save(payload, tmp_path)
-    os.replace(tmp_path, final_path)
-    print(f"[SAVE] Actor+Critic saved to: {final_path}")
-
-
 

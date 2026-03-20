@@ -17,14 +17,14 @@ import copy
 from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 import wandb
-from nets.actor import Actor
-from nets.critic import Critic
+from mpo_baseline.nets.MLP_actor import Actor
+from mpo_baseline.nets.MLP_critic import Critic
 from typing import Optional
 from environment.env_creator import limit_threads, make_train_env, make_eval_env, make_train_vec_env
 from buffer.replaybuffer import ReplayBuffer
 from buffer.replaybuffer_gpu import ReplayBufferGPU
 from train_args import Args
-from train_mpo.train_loop import train_loop
+from mpo_baseline.train_mpo.MPO_Learner import train_loop
 from helpers.warm_up_compilation import warmup_mpo_compile
 
 from mpo.__init__ import MPO

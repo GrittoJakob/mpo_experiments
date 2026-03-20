@@ -2,14 +2,12 @@ import os
 import types
 import torch
 import torch.nn as nn
-from nets.actor import Actor
-from nets.critic import Critic
+from mpo_baseline.nets.MLP_actor import Actor
+from mpo_baseline.nets.MLP_critic import Critic
 
-from .critic_forward_pass import shared_target_critic_forward_pass
 from .critic_update import critic_update_td
 from .expectation_step import expectation_step, compute_weights_temperature_loss
 from .maximization_step import maximization_step
-from .sample_actions import sample_actions_from_target_actor
 
 
 class MPO(object):
@@ -108,12 +106,8 @@ class MPO(object):
         self.expectation_step = types.MethodType(expectation_step, self)
         self.maximization_step = types.MethodType(maximization_step, self)
         self.critic_update_td = types.MethodType(critic_update_td, self)
-        self.sample_actions_from_target_actor = types.MethodType(sample_actions_from_target_actor, self)
         self.compute_weights_temperature_loss = types.MethodType(compute_weights_temperature_loss, self)
-        self.shared_target_critic_forward_pass = types.MethodType(shared_target_critic_forward_pass, self)
 
-
-    
     def update_target_actor_critic(self):
         # param(target_actor) <-- param(actor)
         for target_param, param in zip(self.target_actor.parameters(), self.actor.parameters()):
@@ -122,4 +116,88 @@ class MPO(object):
         # param(target_critic) <-- param(critic)
         for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
-    
+        
+        
+    def shared_target_critic_forward_pass(
+        self, 
+        state_batch,            # [B, dim_obs]
+        next_state_batch,       # [B, dim_obs] 
+        all_sampled_actions,         # [sample_num, 2*B]
+        ):
+
+        # --- state shapes ---
+        assert state_batch.ndim == 2, f"state_batch must be (B, obs_dim), got {tuple(state_batch.shape)}"
+        assert next_state_batch.shape == state_batch.shape, \
+            f"next_state_batch {tuple(next_state_batch.shape)} != state_batch {tuple(state_batch.shape)}"
+        assert state_batch.shape[1] == self.state_dim, \
+            f"state_dim mismatch: state_batch.shape[1]={state_batch.shape[1]} != {self.state_dim}"
+        
+        # get Batch size
+        B = state_batch.size(0)
+
+        # --- action shapes ---
+        assert all_sampled_actions.ndim == 3, \
+            f"all_sampled_actions must be (N, 2B, act_dim), got {tuple(all_sampled_actions.shape)}"
+
+        N, twoB, A = all_sampled_actions.shape
+        assert N == self.sample_action_num, \
+            f"N mismatch: all_sampled_actions N={N} != self.sample_action_num={self.sample_action_num}"
+        assert twoB == 2 * B, \
+            f"2B mismatch: all_sampled_actions.shape[1]={twoB} != 2*B={2*B}"
+        assert A == self.action_dim, \
+            f"act_dim mismatch: all_sampled_actions.shape[2]={A} != self.action_dim={self.action_dim}"
+
+        with torch.no_grad():
+
+            # Preprocessing of states for forward pass
+            all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
+            expanded_all_states = all_states.unsqueeze(0).expand(N, -1, -1) # (N, 2B, obs)  
+            
+            # Forward pass
+            all_target_q = self.target_critic.forward(
+                expanded_all_states.reshape(-1, self.state_dim),    # (N* 2B, action_dim)
+                all_sampled_actions.reshape(-1, self.action_dim)    # (N * 2B, action_dim)
+            ).reshape(N, 2*B)  # (sample_num, 2B)
+        
+        # Split shared forward pass for Q_t and Q_t+1
+        target_q      = all_target_q[:, :B].contiguous()
+        next_target_q = all_target_q[:, B:].contiguous()
+        return target_q, next_target_q
+
+    import torch
+
+
+    def sample_actions_from_target_actor(self, state_batch, next_state_batch = None, sample_num = 20):
+        
+        # This function samples actions from the target actor.
+        # Inputs:
+        #     - state-batch [B, obs_dim]
+        #     - next_state_batch [B, obs_dim]
+        
+        # Function concatenates state batches for shared forward pass in target actor.
+        # Returns:
+        #     - sampled actions 
+        #     - Mu and std from target actor
+        
+        B = state_batch.size(0)
+        with torch.no_grad():
+
+            if next_state_batch is not None:
+                all_states = torch.cat([state_batch, next_state_batch], dim=0)  # (2B, obs_dim)
+
+                # get distribution
+                all_sampled_actions, mu_off, std_off = self.target_actor.sample_action(all_states, sample_num) # (2B,)
+                mu_off  = mu_off.clone()
+                std_off = std_off.clone()   
+
+                all_sampled_actions  = all_sampled_actions.permute(1, 0, 2).contiguous()   # (N, 2B, A)
+                sampled_actions = all_sampled_actions[:, :B].contiguous()                  # (N, B, A)
+                return all_sampled_actions, sampled_actions, mu_off[:B].contiguous(), std_off[:B].contiguous()
+        
+            else:
+                sampled_actions, b_mu, b_std = self.target_actor.sample_action(state_batch, sample_num)
+                sampled_actions = sampled_actions.permute(1,0,2)
+                return sampled_actions, b_mu, b_std
+
+
+
