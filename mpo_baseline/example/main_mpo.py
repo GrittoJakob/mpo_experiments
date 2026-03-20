@@ -23,8 +23,9 @@ from typing import Optional
 from environment.env_creator import limit_threads, make_train_env, make_eval_env, make_train_vec_env
 from buffer.replaybuffer import ReplayBuffer
 from buffer.replaybuffer_gpu import ReplayBufferGPU
-from train_args import Args
-from mpo_baseline.train_mpo.MPO_Learner import train_loop
+from .configs.Ant_v5 import Args
+from writer.init_writer import init_writer
+from mpo_baseline.algorithm.mpo.MPO_Learner import train_loop
 from helpers.warm_up_compilation import warmup_mpo_compile
 
 from mpo.__init__ import MPO
@@ -32,7 +33,7 @@ from mpo.__init__ import MPO
 def make_envs(args, run_name):
     if args.num_envs > 1:
         train_env = make_train_vec_env(
-            args, 
+            args,
             args.env_id,
             args.seed,
             args.num_envs,
@@ -136,7 +137,9 @@ def train():
             compile_mode=getattr(args, "compile_mode", "reduce-overhead"),
         )  
 
-    train_loop(args, train_env, eval_env, device, replaybuffer, mpo, gpu_buffer)
+    writer = init_writer(args)
+
+    train_loop(args, train_env, eval_env, device, replaybuffer, mpo, writer, gpu_buffer)
 
 
 if __name__ == "__main__":

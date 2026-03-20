@@ -2,9 +2,9 @@ import torch
 from typing import Optional
 import os
 import gymnasium as gym
-from .task_wrapper import GoalPositionWrapper
-from .meta_task_wrapper import Meta_InvertedWrapper 
-from .ERFI_Wrappers import RAOActionWrapper, RFIActionWrapper, ERFIEvalActionWrapper
+from Ant_Wrappers.task_wrapper import GoalPositionWrapper
+from Ant_Wrappers.meta_task_wrapper import Meta_InvertedWrapper 
+from Ant_Wrappers.ERFI_Wrappers import RAOActionWrapper, RFIActionWrapper, ERFIEvalActionWrapper
 
 
 def limit_threads(n: int):

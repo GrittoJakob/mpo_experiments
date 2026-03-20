@@ -13,10 +13,10 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 from mpo.__init__ import MPO
 from buffer.replaybuffer import ReplayBuffer
-from rollout.rollout import collect_rollout
-from rollout.video_rollout import log_one_episode_video
-from mpo_baseline.runners.evaluation import evaluate
-from mpo_baseline.buffer.sample_minibatch import sample_minibatch, assert_batch_shapes
+from runners.rollout import collect_rollout
+from runners.video_rollout import log_one_episode_video
+from runners.evaluation import evaluate
+from buffer.sample_minibatch import sample_minibatch, assert_batch_shapes
 from helpers.store_trajectory import store_trajectory
 from mpo_baseline.writer.logging import logging_wandb
 from helpers.save_model import save_actor_critic
@@ -30,6 +30,7 @@ def train_loop(
         device: torch.device,
         replaybuffer: ReplayBuffer,
         mpo: MPO,
+        writer: SummaryWriter,
         gpu_buffer: bool = False
         ):
     """
@@ -39,27 +40,6 @@ def train_loop(
     - Runs MPO E-step and M-step (policy improvement).
     - Periodically evaluates and logs statistics.
     """
-
-    if args.wandb_track:
-        import wandb
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=args.run_name,
-            save_code=True,
-        )
-        wandb.define_metric("grad_updates")
-        wandb.define_metric("video", step_metric="grad_upates")
-
-
-    writer = SummaryWriter(f"runs/{args.run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
-
 
     num_steps = 0
     it = 1
@@ -202,4 +182,3 @@ def train_loop(
     mpo.actor.train()
     mpo.critic.train()
     pbar.close()
-
