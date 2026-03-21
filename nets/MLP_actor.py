@@ -17,6 +17,7 @@ class Actor(nn.Module):
         self.action_space_low = args.action_space_low
         self.action_space_high = args.action_space_high
         self.use_tanh_on_mean = args.use_tanh_on_mean
+        self.clip_to_env = args.clip_to_env
         
 
         self.backbone = nn.Sequential(
@@ -61,9 +62,20 @@ class Actor(nn.Module):
         std = F.softplus(self.std_layer(preprocessing))    # (B, dim_action)
 
         return mean, std
-   
+
+    def get_action_distribution(self, state):
+
+        #Ensure input is batched
+        state_batched = self.ensure_batched(state)
+
+        # Compute forward pass
+        mean, std = self.forward(state_batched)
+        action_distribution = Independent(Normal(mean, std), 1)
+
+        return action_distribution, mean, std
+    
      
-    def action(self, state, clip_to_env: bool = True, deterministic: bool = False):
+    def action(self, state, deterministic: bool = False):
         """
         :param state: (dim_states,)
         :clip_to_env: Flag for clipping the action to the environment action bounds
@@ -71,29 +83,24 @@ class Actor(nn.Module):
         :return: an action
         """
         with torch.no_grad():
-            # Ensure input is batched 
-            is_batched = (state.ndim == 2)
-            state_batched = self.ensure_batched(state)
-
-            # Forward pass
-            mean, std = self.forward(state_batched)
-            action_distribution = Independent(Normal(mean, std), 1)
-
-            # Action sampling
+            # Get action distribution and batch status
+            action_distribution, mean, _ = self.get_action_distribution(state)
+            
+            # Action sampling (deterministic in eval mode)
             if deterministic:
                 action = mean
             else:
                 action = action_distribution.sample()
 
             # Action clipping to env action bounds
-            if clip_to_env:
+            if self.clip_to_env:
                 low = torch.as_tensor(self.action_space_low, device=action.device, dtype=action.dtype)
                 high = torch.as_tensor(self.action_space_high, device=action.device, dtype=action.dtype)
                 action = torch.clamp(action, low, high)
             
             # Ensure action dimension
-            if not is_batched:
-                action = action.squeeze(0)              # (dim_action,)
+            if state.ndim == 1:             # (dim_action)
+                action = action.squeeze(1)
 
         return action.cpu().numpy()
 
@@ -102,19 +109,21 @@ class Actor(nn.Module):
         Sample multiple actions per state from the current policy.
         :param state: (ds,) or (B, ds)
         :param sample_num: number of action samples per state (N)
-        :return: samples with shape (B, N, da)
+        :return: samples with shape (B, N, da) without clipping to env
         """
         with torch.no_grad():
-            # Ensure input is batched 
-            state_batched = self.ensure_batched(state)
+            # Get action distribution and batch status
+            action_distribution, mean, std = self.get_action_distribution(state)
 
-            # Forward pass
-            mean, std = self.forward(state_batched)
-            action_distribution = Independent(Normal(mean, std), 1)
-
+            # Sample from distribution with grad on
             samples = action_distribution.rsample((sample_num,)).permute(1, 0, 2)
 
         return samples, mean, std
 
-    def ensure_batched(self,tensor):
-        return tensor if tensor.ndim == 2 else tensor.unsqueeze(0)
+    def ensure_batched(self, state: torch.Tensor):
+        if state.ndim == 1:
+            return state.unsqueeze(0)
+        if state.ndim == 2:
+            return state
+        else:
+            raise ValueError(f"Expected state with ndim 1 or 2, got shape {state.shape}")

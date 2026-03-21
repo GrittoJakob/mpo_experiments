@@ -135,7 +135,7 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
     else:
         env = _make_base_env(env_id, args, render_mode=None)
         
-    if getattr(args, "env_id") == "Ant-v5":
+    if args.env_id == "Ant-v5":
         env = maybe_wrap_task(env, args, eval_env = True)
 
     env.action_space.seed(seed_offset)

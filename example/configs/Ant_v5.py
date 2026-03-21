@@ -23,7 +23,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 200
+    log_period: int = 87
     "number of global updates per log to wandb"
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
@@ -31,8 +31,11 @@ class Args:
     """iterations per logging exactly one episode video"""
     buffer_on_cuda: bool = True
     """store replay_buffer on cuda"""
-    num_envs: int = 2
+    num_envs: int = 4
+    """number of environments for rollout, currently used: AsyncVecEnv"""
     sample_steps_per_iter: int = 1000
+    """number of env steps per rollout in every iteration"""
+    
 
 
     # ===============================
@@ -74,11 +77,11 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_buffer_capacity: int = 50000
+    max_buffer_capacity: int = 100000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
-    warm_up_steps: int = 15000
+    warm_up_steps: int = 5000
     """number of warm-up steps for the buffer"""
     delay_policy_update: int = 2
     """number of critic updates per policy update"""
@@ -96,7 +99,7 @@ class Args:
     """constrain for action penalty loss term"""
     penalty_mix: float = 0.25
     """parameter for mixing dual_losses in E-Step (action penalty and normal dual loss)"""
-    use_action_clipping: bool = True
+    clip_to_env: bool = True
     """whether to use action clipping in rollout to save clipped action or not"""
     use_tanh_on_mean:bool = True
     """use tanh on mean in actor after last layer"""
@@ -106,16 +109,16 @@ class Args:
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
-    batch_size: int = 128
+    batch_size: int = 256
     """batch size used when sampling from replay buffer"""
-    max_training_steps: int = 50000
+    max_training_steps: int = 100000
     """Maximal number of env steps for training"""
 
     # ===============================
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 10
+    evaluate_period: int = 5
     """evaluate the agent every N iterations"""
     evaluate_episode_num: int = 5
     """how many evaluation episodes to run"""

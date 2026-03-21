@@ -33,7 +33,7 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                 ep_steps= 0.0
 
                 # Reset environment at the beginning of each episode
-                state, info = eval_env.reset()
+                state, _ = eval_env.reset()
 
                 # Loop over one episode
                 while True:
@@ -42,13 +42,14 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                     state_tensor = torch.as_tensor(
                         state, dtype=torch.float32, device=device
                         )
-                    
+
                     # Get action from actor
-                    action = actor.action(state_tensor, clip_to_env = True, deterministic = True)   # Already numpy 
+                    action = actor.action(state_tensor, deterministic = True)   # Already numpy 
                     action_list.append(action)
 
                     # Step environment
                     next_state, reward, terminated, truncated, info = eval_env.step(action)
+    
                     done = terminated or truncated
                     ep_steps +=1
 
