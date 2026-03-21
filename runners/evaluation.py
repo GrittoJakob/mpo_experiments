@@ -2,9 +2,9 @@ import gymnasium as gym
 import torch
 import numpy as np
 import options
-from .task_specific_evaluation_scripty.evaluation_inverted_goals import evaluate_inverted_goal
-from .task_specific_evaluation_scripty.evaluation_ERFI_noise import evaluate_erfi
-from .task_specific_evaluation_scripty.evaluation_target_goals import evaluate_target_goal
+from runners.task_specific_evaluation_scripts.evaluation_inverted_goals import evaluate_inverted_goal
+from runners.task_specific_evaluation_scripts.evaluation_ERFI_noise import evaluate_erfi
+from runners.task_specific_evaluation_scripts.evaluation_target_goals import evaluate_target_goal
 
 def evaluate(args, actor, eval_env, writer, device, global_step):
     """
@@ -36,7 +36,7 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                 state, info = eval_env.reset()
 
                 # Loop over one episode
-                for s in range(args.evaluate_episode_maxstep):
+                while True:
 
                     # Convert state to tensor on the correct device
                     state_tensor = torch.as_tensor(
@@ -44,10 +44,7 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                         )
                     
                     # Get action from actor
-                    action = actor.action(state_tensor, clip_to_env = True, deterministic = True)
-                    if args.use_action_clipping:
-                        action = np.clip(action, args.action_space_low, args.action_space_high)
-                    
+                    action = actor.action(state_tensor, clip_to_env = True, deterministic = True)   # Already numpy 
                     action_list.append(action)
 
                     # Step environment

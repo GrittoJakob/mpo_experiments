@@ -26,7 +26,7 @@ def evaluate_erfi(args, actor, eval_env, writer, device, global_step):
 
                 state, info = eval_env.reset(options={"erfi_mode": mode})
 
-                for _ in range(args.evaluate_episode_maxstep):
+                while True:
                     state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
 
                     action = actor.action(state_tensor, deterministic=True)

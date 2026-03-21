@@ -11,7 +11,7 @@ class Args:
     """the name of this experiment"""
     device: str = "cuda"
     """device used for training ('cpu' or 'cuda')"""
-    env_id: str = "Ant-v5"
+    env_id: str = "Pendulum-v1"
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
@@ -31,10 +31,9 @@ class Args:
     """iterations per logging exactly one episode video"""
     buffer_on_cuda: bool = True
     """store replay_buffer on cuda"""
-    num_envs: int = 4
-    asynchronous: bool = True
-   
-    
+    num_envs: int = 2
+    sample_steps_per_iter: int = 1000
+
 
     # ===============================
     # MPO Algorithm Parameters
@@ -47,9 +46,9 @@ class Args:
     """directory used for logs and model checkpoints"""
     discount_factor: float = 0.99
     """discount factor gamma, used in TD updates for the critic"""
-    hidden_size_actor: int = 256
+    hidden_size_actor: int = 128
     """hidden size of actor network"""
-    hidden_size_critic: int = 512
+    hidden_size_critic: int = 128
     """hidden size of critc network"""
     actor_lr: float = 1e-4
     """Learning rate for actor Adam optimizer"""
@@ -75,7 +74,7 @@ class Args:
     """loss function type for the critic, e.g. 'mse' or 'huber'"""
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_buffer_capacity: int = 800000
+    max_buffer_capacity: int = 50000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     std_init: float = 0.7
     """desired std for actor inialization on diagonal"""
@@ -102,19 +101,14 @@ class Args:
     use_tanh_on_mean:bool = True
     """use tanh on mean in actor after last layer"""
     use_mass_force_KL: bool = True
+    """flag for using mass-forced KL divergence in the M-Step"""
 
     # ===============================
     # Sampling / Replay Buffer
     # ===============================
-    min_steps_per_env: int = 1000
-    """number of env steps to sample per iteration"""
-    sample_episode_maxstep: int = 1000
-    """maximum number of steps per sampled episode"""
-    batch_size: int = 1024
+    batch_size: int = 128
     """batch size used when sampling from replay buffer"""
-    print_replay_buffer: bool = False
-    """Print shape and one episode from replay buffer for debugging"""
-    max_training_steps: int = 5000000
+    max_training_steps: int = 50000
     """Maximal number of env steps for training"""
 
     # ===============================
@@ -123,104 +117,96 @@ class Args:
 
     evaluate_period: int = 10
     """evaluate the agent every N iterations"""
-    evaluate_episode_num: int = 4
+    evaluate_episode_num: int = 5
     """how many evaluation episodes to run"""
-    evaluate_episode_maxstep: int = 1000
-    """max steps per evaluation episode"""
 
     # ===============================
     # Logging / Checkpointing
     # ===============================
 
-    render: bool = False
-    """render environment during sampling"""
     load: Optional[str] = None
     """optional checkpoint file to load before training"""
-    save_every: int = 100
-    """save full model every N MPO iterations"""
-    save_latest: bool = True
-    """always update a lightweight 'latest' checkpoint (fast, no replay buffer)"""
-    save_replay_buffer: bool = True
-    """whether to include replay buffer in checkpoints (large files!)"""
     save_every_env_steps: int = 1000000
-
+    """Flag how often actor and critic are saved in checkpoints"""
 
     # ===============================
     # warm up compilation
     # ===============================
-    use_compile: bool = True
+    use_compile: bool = False
     """torch.compilation flag"""
     compile_mode: str=  "default"
     """compile mode for torch compilation"""
 
-    # ===============================
-    # Reward shaping for ant env
-    # ===============================
-    # ctrl_cost_weight: float = 0.5
-    # """ Weight for ctrl_cost term, default = 0.5"""
-    # healthy_reward_weight: float = 0.8
-    # """Weight for healthy_reward term, default = 1.2, 0.8 for multi task"""
-    # contact_cost_weight: float = 5e-4
-    # """Weight for contact_cost term, default = 5e-4"""
-    # forward_reward_weight: float = 1.0
-    # """Weight for forward_reward term, default = 1"""
-
-
-    # ===============================
-    # Multi-Task settings
-    # ===============================
-
-    # Task Constraints
-    ctrl_cost_weight: float = 0.5
-    """ Weight for ctrl_cost term, default = 0.5"""
-    healthy_reward_weight: float = 1.0
-    """Weight for healthy_reward term, default = 1.2"""
-    contact_cost_weight: float = 5e-4
-    """Weight for contact_cost term, default = 5e-4"""
+    # =========================
+    # Base Ant reward settings
+    # =========================
     forward_reward_weight: float = 1.0
-    """Weight for forward_reward term, default = 1"""
+    """Weight for forward progress reward."""
+    healthy_reward_weight: float = 1.2
+    """Weight for alive/healthy reward. Use e.g. 0.8 for multi-task setups."""
+    ctrl_cost_weight: float = 0.5
+    """Weight for control cost term."""
+    contact_cost_weight: float = 5e-4
+    """Weight for contact cost term."""
 
-    velocity_reward_scale: float = 1.5
-    """scale parameter for reward flipped velocity"""
-    scale_wrong_direction_reward: float = 1.5
-    """scale parameter for scale if velocity is wrong direction"""
-    movement_bonus_scale: float = 0.1
-    """scale parameter for movement reward, movement in any direction"""
-    tilt_penalty_weight: float = 0.5
-    """weight parameter for tilt penalty, penalizes only excess tilt over threshold"""
-    death_penalty: float = -50.0
-    position_reward_scale: float = 5
-    success_radius: float = 2
-    maximum_area: float = 100
-    vel_rew_max_speed: float = 4.0
-
-
-    # ## in train_args.py 
-    task_mode: str = "target_goal_ferdinand" 
-    """Options: 'default' (Run Forward), 'velocity' (Match Speed), 'target' (Go to XY)"""
-    # velocity_reward_scale: float = 1.75
-    # """scale parameter for reward flipped velocity"""
-    # scale_wrong_direction_reward: float = 1.75
-    # """scale parameter for scale if velocity is wrong direction"""
-    # position_reward_scale: float = 5
-    # goal_radius: float = 25
-    # success_radius: float = 2
-    # maximum_area: float = 100
-    # history_len: int = 5
-    # """lenght of history to append in obs"""
-    # append_task_reward: bool = False
-    # """to append the specific task reward in obs"""
-    track_trajectory: bool = False
+    # ==================================
+    # Task mode / environment behaviour
+    # ==================================
+    task_mode: str = "default"
+    """Options:
+    - 'default': run forward
+    - 'inverted_without_task_hint': meta-learning test, run only in two directions without task hint
+    - 'target_goal': move to target XY position, with task hint
+    """
     include_cfrc_ext_in_observation: bool = True
-    """flag for exlude/include central force terms in observations"""
+    """Whether to include external contact force terms in the observation."""
 
-    
-    rand_mode: str = "ERFI"
-    """the environment parametrization type for meta-learning""" # Currently supports ERFI, RAO, RFI, and None (no param randomization)
+    # ============================
+    # Velocity task reward shaping
+    # ============================
+    velocity_reward_scale: float = 1.5
+    """Scaling factor for velocity-matching reward."""
+    scale_wrong_direction_reward: float = 1.5
+    """Penalty/reduction scaling when moving in the wrong direction."""
+    vel_rew_max_speed: float = 4.0
+    """Maximum speed considered in the velocity reward."""
+
+    # ==========================
+    # Target / position task
+    # ==========================
+    position_reward_scale: float = 5.0
+    """Scaling factor for target-position reward."""
+    success_radius: float = 2.0
+    """Distance threshold for task success."""
+    maximum_area: float = 100.0
+    """Maximum target sampling area / workspace bound."""
+
+    # ==========================
+    # General auxiliary rewards
+    # ==========================
+    movement_bonus_scale: float = 0.1
+    """Bonus for movement in any direction."""
+    tilt_penalty_weight: float = 0.5
+    """Penalty weight for excess torso tilt beyond threshold."""
+    death_penalty: float = -50.0
+    """Penalty applied when the agent dies / becomes unhealthy."""
+
+
+    # =========================================
+    # Domain randomization / meta-learning setup
+    # =========================================
+    rand_mode: str = "default"
+    """Environment parameter randomization mode.
+    Currently supports:
+    - 'ERFI'
+    - 'RAO'
+    - 'RFI'
+    - None: no parameter randomization
+    """
     rand_split_ratio: float = 0.5
-    """the ratio at which to split the population for ERFI mode, if 0.9 the first 90% of the population uses RFI and the last 10% uses RAO"""
+    """Population split ratio used in ERFI mode.
+    Example: 0.9 means first 90% use RFI and last 10% use RAO.
+    """
     noise_limit: float = 0.1
-    """noise limit for RFI and RAO"""
-
-           
+    """Noise limit for RFI and RAO randomization."""
 

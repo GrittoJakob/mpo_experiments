@@ -11,14 +11,12 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
-from algorithm.__init__ import MPO
+from mpo.algorithm.__init__ import MPO
 from buffer.replaybuffer import ReplayBuffer
 from runners.rollout import collect_rollout
 from runners.video_rollout import log_one_episode_video
 from runners.evaluation import evaluate
-from buffer.sample_minibatch import sample_minibatch, assert_batch_shapes
-from helpers.store_trajectory import store_trajectory
-from mpo_baseline.writer.logging import logging_wandb
+from writer.logging import logging_wandb
 from helpers.save_model import save_actor_critic
 
 
@@ -47,7 +45,7 @@ def MPO_Learner(
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
-        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer)
+        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer, device)
         num_steps += new_steps
 
     
@@ -56,7 +54,7 @@ def MPO_Learner(
     while num_steps < args.max_training_steps:
 
         # Collect fresh experience for this iteration
-        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer)
+        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer, device)
 
         #Update current steps for while loop
         num_steps += new_steps
@@ -115,7 +113,7 @@ def MPO_Learner(
 
             # Policy evaluation (critic update)
             collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0)
-            critic_update_stats = mpo.critic_update_td( 
+            critic_update_stats = mpo.td_learning( 
                 next_target_q = next_target_q,
                 state_batch = obs_batch, 
                 action_batch =actions_batch, 
@@ -149,7 +147,6 @@ def MPO_Learner(
             if args.wandb_track and (i_update % args.log_period == 0) and collect_stats:
                 logging_wandb(
                     writer = writer,
-                    args = args,
                     replaybuffer = replaybuffer, 
                     stats_m_step = stats_m_step,
                     stats_e_step = stats_e_step,

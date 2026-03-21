@@ -2,15 +2,15 @@ import os
 import types
 import torch
 import torch.nn as nn
-from mpo_baseline.nets.MLP_actor import Actor
-from mpo_baseline.nets.MLP_critic import Critic
+from nets.MLP_actor import Actor
+from nets.MLP_critic import Critic
 
-from .critic_update import critic_update_td
+from .td_learning import td_learning
 from .expectation_step import expectation_step, compute_weights_temperature_loss
 from .maximization_step import maximization_step
 
 
-class MPO_Optimizer(object):
+class MPO(object):
     def __init__(
             self, 
             args, 
@@ -105,7 +105,7 @@ class MPO_Optimizer(object):
         # Bindings of functions
         self.expectation_step = types.MethodType(expectation_step, self)
         self.maximization_step = types.MethodType(maximization_step, self)
-        self.critic_update_td = types.MethodType(critic_update_td, self)
+        self.td_learning = types.MethodType(td_learning, self)
         self.compute_weights_temperature_loss = types.MethodType(compute_weights_temperature_loss, self)
 
     def update_target_actor_critic(self):
@@ -163,9 +163,6 @@ class MPO_Optimizer(object):
         target_q      = all_target_q[:, :B].contiguous()
         next_target_q = all_target_q[:, B:].contiguous()
         return target_q, next_target_q
-
-    import torch
-
 
     def sample_actions_from_target_actor(self, state_batch, next_state_batch = None, sample_num = 20):
         

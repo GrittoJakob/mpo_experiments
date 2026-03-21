@@ -32,7 +32,7 @@ def evaluate_inverted_goal(args, actor, eval_env, writer, device, global_step):
                 # Reset environment at the beginning of each episode
                 
                 state, info = eval_env.reset(options = options)
-                for s in range(args.evaluate_episode_maxstep):
+                while True:
 
                     # Convert state to tensor on the correct device
                     state_tensor = torch.as_tensor(

@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 
-def collect_rollout(env, state, args, actor, replaybuffer):
+def collect_rollout(env, state, args, actor, replaybuffer, device):
     """
     Collect rollout steps with the current policy and store them in the replay buffer.
 

@@ -35,7 +35,7 @@ def evaluate_target_goal(args, actor, eval_env, writer, device, global_step):
             ep_return = 0.0
             ep_steps = 0
 
-            for s in range(args.evaluate_episode_maxstep):
+            while True:
                 state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
                 action = actor.action(state_tensor, deterministic=True)
 

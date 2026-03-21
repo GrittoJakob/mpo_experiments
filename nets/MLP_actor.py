@@ -14,6 +14,8 @@ class Actor(nn.Module):
         self.hidden_size= args.hidden_size_actor
         self._printed_init_cov = False
         std_init = args.std_init
+        self.action_space_low = args.action_space_low
+        self.action_space_high = args.action_space_high
         self.use_tanh_on_mean = args.use_tanh_on_mean
         
 
@@ -85,8 +87,8 @@ class Actor(nn.Module):
 
             # Action clipping to env action bounds
             if clip_to_env:
-                low = torch.as_tensor(self.env.action_space.low, device=action.device, dtype=action.dtype)
-                high = torch.as_tensor(self.env.action_space.high, device=action.device, dtype=action.dtype)
+                low = torch.as_tensor(self.action_space_low, device=action.device, dtype=action.dtype)
+                high = torch.as_tensor(self.action_space_high, device=action.device, dtype=action.dtype)
                 action = torch.clamp(action, low, high)
             
             # Ensure action dimension
@@ -95,6 +97,24 @@ class Actor(nn.Module):
 
         return action.cpu().numpy()
 
+    def sample_action(self, state, sample_num):
+        """
+        Sample multiple actions per state from the current policy.
+        :param state: (ds,) or (B, ds)
+        :param sample_num: number of action samples per state (N)
+        :return: samples with shape (B, N, da)
+        """
+        with torch.no_grad():
+            # Ensure input is batched 
+            state_batched = self.ensure_batched(state)
+
+            # Forward pass
+            mean, std = self.forward(state_batched)
+            action_distribution = Independent(Normal(mean, std), 1)
+
+            samples = action_distribution.rsample((sample_num,)).permute(1, 0, 2)
+
+        return samples, mean, std
 
     def ensure_batched(self,tensor):
         return tensor if tensor.ndim == 2 else tensor.unsqueeze(0)

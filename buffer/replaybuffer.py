@@ -63,9 +63,9 @@ class ReplayBuffer:
         assert terminated.shape[0] == batch_size
 
         # Compute idx range (pointer + batch_size)
-        # If self.ptr > self.capacity pointer starts at zero again 
+        # If self.pointer > self.capacity pointer starts at zero again 
         # FIFO logic automatically included
-        idx = torch.arange(self.ptr, self.ptr + batch_size, device=self.device) % self.capacity
+        idx = torch.arange(self.pointer, self.pointer + batch_size, device=self.device) % self.capacity
 
         # Store batch in buffer at positions from idx
         self.obs[idx] = obs

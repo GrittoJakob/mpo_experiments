@@ -18,15 +18,15 @@ import copy
 from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
 import wandb
-from .nets.MLP_actor import Actor
-from .nets.MLP_critic import Critic
-from .environment.env_creator import limit_threads, make_eval_env, make_train_vec_env
-from .buffer.replaybuffer import ReplayBuffer
-from .example.configs.Ant_v5 import Args
-from .writer.init_writer import init_writer
-from .mpo.algorithm.__init__ import MPO
-from .mpo.train_script.MPO_Learner import MPO_Learner
-from .helpers.warm_up_compilation import warmup_mpo_compile
+from nets.MLP_actor import Actor
+from nets.MLP_critic import Critic
+from environment.env_creator import limit_threads, make_eval_env, make_train_vec_env
+from buffer.replaybuffer import ReplayBuffer
+from example.configs.Ant_v5 import Args
+from writer.init_writer import init_writer
+from mpo.algorithm.__init__ import MPO
+from mpo.train_script.MPO_Learner import MPO_Learner
+from helpers.warm_up_compilation import warmup_mpo_compile
 
 def make_envs(args, run_name):
     train_env = make_train_vec_env(
@@ -40,6 +40,8 @@ def make_envs(args, run_name):
 
     args.obs_dim   = int(np.prod(train_env.single_observation_space.shape))
     args.action_dim  = int(np.prod(train_env.single_action_space.shape))
+    args.action_space_low = train_env.action_space.low
+    args.action_space_high = train_env.action_space.high
     
     return train_env, eval_env
 
@@ -64,7 +66,11 @@ def make_optimizer(args, actor, critic):
 
 def train():
     args = tyro.cli(Args)
-    limit_threads(_DEFAULT_THREADS)
+    try: 
+        num_threads = int(_DEFAULT_THREADS)
+    except ValueError:
+        num_threads = None
+    limit_threads(num_threads)
     
     # Device
     device = torch.device("cuda" if (args.device == "cuda" and torch.cuda.is_available()) else "cpu")
@@ -123,7 +129,7 @@ def train():
 
     writer = init_writer(args)
 
-    train_loop(args, train_env, eval_env, device, replaybuffer, mpo, writer, gpu_buffer)
+    MPO_Learner(args, train_env, eval_env, device, replaybuffer, mpo, writer)
 
 
 if __name__ == "__main__":
