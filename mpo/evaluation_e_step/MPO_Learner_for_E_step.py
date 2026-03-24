@@ -18,10 +18,11 @@ from runners.video_rollout import log_one_episode_video
 from runners.evaluation import evaluate
 from writer.logging import logging_wandb
 from helpers.save_model import save_actor_critic
+from .script_e_step_eval import script_e_step_eval
 
 
 
-def MPO_Learner(
+def MPO_Learner_E_Step(
         args, 
         train_env, 
         eval_env,
@@ -42,6 +43,7 @@ def MPO_Learner(
     num_steps = 0
     it = 1
     grad_updates = 0 
+    e_step_eval_period = 1_000_000
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
@@ -72,7 +74,8 @@ def MPO_Learner(
         num_updates_per_iter = math.ceil(
             args.UTD_ratio * new_steps
             )
-
+        
+    
         # Perform several updates per iteration (UTD ratio)
         for i_update in range(num_updates_per_iter):
             grad_updates += 1
@@ -114,6 +117,13 @@ def MPO_Learner(
                 truncated_batch= truncated_batch,
                 collect_stats= collect_stats
                 )
+            
+            if grad_updates % e_step_eval_period:
+                norm_target_q, stats_e_step = mpo.expectation_step(
+                    target_q= target_q,
+                    sampled_actions=sampled_actions, 
+                    collect_stats = collect_stats
+                    )
 
             # Delay policy updates for better stability by training the critic more often
             if (i_update % args.delay_policy_update == 0):
@@ -146,12 +156,13 @@ def MPO_Learner(
                     grad_updates = grad_updates, 
                     num_steps = num_steps
                 )
-
+            
              
             # Target network update & logging
             # Periodically sync target networks with current actor/critic
             if grad_updates % args.target_update_period == 0:
                 mpo.update_target_actor_critic()
+
 
 
         # Evaluation
@@ -161,7 +172,13 @@ def MPO_Learner(
             mpo.actor.eval()
             evaluate(args, mpo.actor, eval_env, writer, device, num_steps)
             mpo.actor.train()
-
+        if it % args.eval_e_step == 0:
+            script_e_step_eval(
+                args,
+                mpo,
+                replaybuffer                
+            )
+        
         # Update iteration counter
         it += 1    
     

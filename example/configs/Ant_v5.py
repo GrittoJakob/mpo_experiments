@@ -21,21 +21,22 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "fsandco"
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 87
+    log_period: int = 90
     "number of global updates per log to wandb"
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""
-    log_videos_period: int = 75
+    log_videos_period: int = 20
     """iterations per logging exactly one episode video"""
     buffer_on_cuda: bool = True
     """store replay_buffer on cuda"""
     num_envs: int = 4
     """number of environments for rollout, currently used: AsyncVecEnv"""
-    sample_steps_per_iter: int = 1000
+    sample_steps_per_iter: int = 1600
     """number of env steps per rollout in every iteration"""
-    
+    use_e_step_evaluation_leaner: bool = True
+    """flag for using the extra mpo learner which saves the different E-Step distribution during learning"""
 
 
     # ===============================
@@ -53,9 +54,9 @@ class Args:
     """hidden size of actor network"""
     hidden_size_critic: int = 128
     """hidden size of critc network"""
-    actor_lr: float = 1e-4
+    actor_lr: float = 3e-4
     """Learning rate for actor Adam optimizer"""
-    critic_lr: float = 1e-4
+    critic_lr: float = 3e-4
     """Learning rate for critic adam optimizer"""
     eta_lr : float = 1e-3
     "Learning rate for dual function"
@@ -111,7 +112,7 @@ class Args:
     # ===============================
     batch_size: int = 256
     """batch size used when sampling from replay buffer"""
-    max_training_steps: int = 100000
+    max_training_steps: int = 500000
     """Maximal number of env steps for training"""
 
     # ===============================
@@ -213,3 +214,11 @@ class Args:
     noise_limit: float = 0.1
     """Noise limit for RFI and RAO randomization."""
 
+
+    # =========================================
+    # E-Step Evaluation Distribution Parameters
+    # ========================================= 
+    eval_e_step: int = 5
+    """how often to evaluate E-step distribution"""
+    use_e_step_eval: bool = True
+    """Flag for using new MPO_Learner for E-step evaluation"""

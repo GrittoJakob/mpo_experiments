@@ -27,6 +27,7 @@ from writer.init_writer import init_writer
 from mpo.algorithm.__init__ import MPO
 from mpo.train_script.MPO_Learner import MPO_Learner
 from helpers.warm_up_compilation import warmup_mpo_compile
+from mpo.evaluation_e_step.MPO_Learner_for_E_step import MPO_Learner_E_Step
 
 def make_envs(args, run_name):
     train_env = make_train_vec_env(
@@ -129,7 +130,10 @@ def train():
 
     writer = init_writer(args)
 
-    MPO_Learner(args, train_env, eval_env, device, replaybuffer, mpo, writer)
+    if args.use_e_step_eval:
+        MPO_Learner_E_Step(args, train_env, eval_env, device, replaybuffer, mpo, writer)
+    else:
+        MPO_Learner(args, train_env, eval_env, device, replaybuffer, mpo, writer)
 
 
 if __name__ == "__main__":
