@@ -18,7 +18,8 @@ from runners.video_rollout import log_one_episode_video
 from runners.evaluation import evaluate
 from writer.logging import logging_wandb
 from helpers.save_model import save_actor_critic
-from .script_e_step_eval import script_e_step_eval
+from .e_step_evaluation import expectation_step_eval
+
 
 
 
@@ -41,9 +42,9 @@ def MPO_Learner_E_Step(
 
     state, _ = train_env.reset()
     num_steps = 0
-    it = 1
+    it = 0
     grad_updates = 0 
-    e_step_eval_period = 1_000_000
+
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
@@ -107,7 +108,7 @@ def MPO_Learner_E_Step(
             )
 
             # Policy evaluation (critic update)
-            collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0)
+            collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update % args.delay_policy_update == 0)
             critic_update_stats = mpo.td_learning( 
                 next_target_q = next_target_q,
                 state_batch = obs_batch, 
@@ -118,13 +119,6 @@ def MPO_Learner_E_Step(
                 collect_stats= collect_stats
                 )
             
-            if grad_updates % e_step_eval_period:
-                norm_target_q, stats_e_step = mpo.expectation_step(
-                    target_q= target_q,
-                    sampled_actions=sampled_actions, 
-                    collect_stats = collect_stats
-                    )
-
             # Delay policy updates for better stability by training the critic more often
             if (i_update % args.delay_policy_update == 0):
                 
@@ -172,12 +166,44 @@ def MPO_Learner_E_Step(
             mpo.actor.eval()
             evaluate(args, mpo.actor, eval_env, writer, device, num_steps)
             mpo.actor.train()
+
+        # Additonal evaluation of E-Step distribution:
+        # Visaualizes distribution of original weights and action penalty weights + final distribution in wandb
         if it % args.eval_e_step == 0:
-            script_e_step_eval(
-                args,
-                mpo,
-                replaybuffer                
-            )
+
+            print("E-step evaluation begins")
+            # Sample mini batch from buffer
+            batch = replaybuffer.sample_batch(1)
+            obs_batch = batch["obs"]
+            next_obs_batch = batch["next_obs"]
+
+            with torch.no_grad():
+                # Compute target_actor forward pass to get sampled_actions an b_mu, b_st
+                # all_sampled_actions: sampled actions for timestep t and t+1 concatenated
+                # sampled actions: sampled actions only for timestep t
+                all_sampled_actions, sampled_actions, mu_off, std_off = mpo.sample_actions_from_target_actor(
+                    state_batch= obs_batch,
+                    next_state_batch= next_obs_batch,
+                    sample_num= args.sample_action_num_for_dist_eval
+                )
+
+                # Compute forward pass of target critic for state_batch and next_state_batch
+                target_q, _= mpo.shared_target_critic_forward_pass(
+                    state_batch = obs_batch,
+                    next_state_batch= next_obs_batch,
+                    all_sampled_actions = all_sampled_actions
+                )
+                
+                _ = expectation_step_eval(
+                    mpo = mpo,
+                    target_q= target_q,
+                    mu_off = mu_off,
+                    std_off = std_off,
+                    sampled_actions=sampled_actions, 
+                    writer= writer,
+                    step = grad_updates
+                    )
+
         
         # Update iteration counter
         it += 1    

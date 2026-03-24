@@ -218,7 +218,9 @@ class Args:
     # =========================================
     # E-Step Evaluation Distribution Parameters
     # ========================================= 
-    eval_e_step: int = 5
+    eval_e_step: int = 3
     """how often to evaluate E-step distribution"""
     use_e_step_eval: bool = True
     """Flag for using new MPO_Learner for E-step evaluation"""
+    sample_action_num_for_dist_eval: int = 32
+    """how many samples for e-step evaluation"""

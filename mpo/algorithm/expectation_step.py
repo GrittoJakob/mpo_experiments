@@ -17,7 +17,7 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
         self.eta_penalty.grad = None
 
     # Dual function returns a scalar that we differentiate w.r.t. eta and our normalized values
-    norm_target_q, loss_temperature = self.compute_weights_temperature_loss(self.eta_dual, target_q, self.eps_dual)
+    norm_target_q, loss_temperature = compute_weights_temperature_loss(self.eta_dual, target_q, self.eps_dual)
     loss_dual = loss_temperature
 
     # Initialize action penalty variables with None
@@ -43,7 +43,7 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
         cost_out_of_bound = -(diff_out_of_bound.pow(2).sum(dim=-1))  # (N,B)
 
         # Compute dual function for eta and get weights
-        penalty_normalized_weights, loss_penalty_temperature = self.compute_weights_temperature_loss(
+        penalty_normalized_weights, loss_penalty_temperature = compute_weights_temperature_loss(
             self.eta_penalty, cost_out_of_bound, self.eps_penalty
             )
 
@@ -79,7 +79,7 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
     return norm_target_q, stats
 
 
-def compute_weights_temperature_loss(self, temperature: torch.Tensor, values: torch.Tensor, epsilon: float):
+def compute_weights_temperature_loss(temperature: torch.Tensor, values: torch.Tensor, epsilon: float):
     """
     temperature: torch scalar, requires_grad=True
     values: (N, B)  (No Gradients)
