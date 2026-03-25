@@ -1,10 +1,10 @@
 import numpy as np
 import torch
-from typing import Deque, Any, List, Sequence, Tuple
+
 
 class ReplayBuffer:
     """
-    Episodic replay buffer with a flat ring-buffer on GPU OR CPU (both compatible).
+    Single step replay buffer with a flat ring-buffer on GPU OR CPU (both compatible).
 
     Stores transitions:
       (state, action, next_state, reward, terminated, truncated)
