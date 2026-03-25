@@ -102,6 +102,9 @@ class MPO(object):
         self.eta_mu = torch.full((self.action_dim,), args.init_eta_mu, device=self.device,dtype=torch.float32)
         self.eta_sigma = torch.full((self.action_dim,), args.init_eta_sigma, device=self.device, dtype=torch.float32)
 
+        # E-step evaluation parameters if chosen
+        self.sample_action_num_for_dist_eval = getattr(args, "sample_action_num_for_dist_eval", self.sample_action_num)
+       
         # Bindings of functions
         self.expectation_step = types.MethodType(expectation_step, self)
         self.maximization_step = types.MethodType(maximization_step, self)
@@ -140,8 +143,8 @@ class MPO(object):
             f"all_sampled_actions must be (N, 2B, act_dim), got {tuple(all_sampled_actions.shape)}"
 
         N, twoB, A = all_sampled_actions.shape
-        assert N == self.sample_action_num, \
-            f"N mismatch: all_sampled_actions N={N} != self.sample_action_num={self.sample_action_num}"
+        assert (N == self.sample_action_num) or (N == self.sample_action_num_for_dist_eval), \
+             f"N mismatch: all_sampled_actions N={N} != self.sample_action_num={self.sample_action_num}"
         assert twoB == 2 * B, \
             f"2B mismatch: all_sampled_actions.shape[1]={twoB} != 2*B={2*B}"
         assert A == self.action_dim, \

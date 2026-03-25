@@ -19,6 +19,7 @@ from runners.evaluation import evaluate
 from writer.logging import logging_wandb
 from helpers.save_model import save_actor_critic
 from .e_step_evaluation import expectation_step_eval
+from .m_step_evaluation import maximization_step_eval
 
 
 
@@ -194,17 +195,29 @@ def MPO_Learner_E_Step(
                     all_sampled_actions = all_sampled_actions
                 )
                 
-                _ = expectation_step_eval(
-                    mpo = mpo,
-                    target_q= target_q,
-                    mu_off = mu_off,
-                    std_off = std_off,
-                    sampled_actions=sampled_actions, 
-                    writer= writer,
-                    step = grad_updates
-                    )
-
-        
+            final_target_q, _ = expectation_step_eval(
+                mpo = mpo,
+                target_q= target_q,
+                mu_off = mu_off,
+                std_off = std_off,
+                sampled_actions=sampled_actions, 
+                writer= writer,
+                step = grad_updates
+                )
+            
+            maximization_step_eval(
+                mpo=mpo,
+                num_iterations=args.m_step_eval_iterations,
+                state_batch=obs_batch,
+                norm_target_q=final_target_q,
+                sampled_actions=sampled_actions,
+                mu_off=mu_off,
+                std_off=std_off,
+                writer=writer,
+                step=grad_updates,
+            )
+                
+                
         # Update iteration counter
         it += 1    
     

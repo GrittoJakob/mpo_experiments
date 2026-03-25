@@ -224,3 +224,5 @@ class Args:
     """Flag for using new MPO_Learner for E-step evaluation"""
     sample_action_num_for_dist_eval: int = 32
     """how many samples for e-step evaluation"""
+    m_step_eval_iterations: int = 4
+    """number of iterations in the evaluation of the M-Step to show the fitting of the online actor to the auxiliar distribution"""
