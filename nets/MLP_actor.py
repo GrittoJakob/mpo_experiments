@@ -19,6 +19,7 @@ class Actor(nn.Module):
         self.use_tanh_on_mean = args.use_tanh_on_mean
         self.clip_to_env = args.clip_to_env
         
+        
 
         self.backbone = nn.Sequential(
             nn.Linear(self.dim_states, self.hidden_size),
@@ -53,6 +54,8 @@ class Actor(nn.Module):
         
         #Mean Head
         mean = self.mean_layer(preprocessing)   # (B, dim_action)
+        high = torch.as_tensor(self.action_space_high, device=mean.device, dtype=mean.dtype)
+        mean = mean * high
 
         # Only if flag is true in input args(recommended)
         if self.use_tanh_on_mean:

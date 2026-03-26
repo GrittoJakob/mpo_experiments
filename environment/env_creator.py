@@ -2,6 +2,8 @@ import torch
 from typing import Optional
 import os
 import gymnasium as gym
+import gymnasium_robotics
+gym.register_envs(gymnasium_robotics)
 from .Ant_Wrappers.task_wrapper import GoalPositionWrapper
 from .Ant_Wrappers.meta_task_wrapper import Meta_InvertedWrapper 
 from .Ant_Wrappers.ERFI_Wrappers import RAOActionWrapper, RFIActionWrapper, ERFIEvalActionWrapper
@@ -98,6 +100,16 @@ def _make_base_env(env_id: str, args, render_mode: Optional[str] = None):
         if render_mode is not None:
             kwargs["render_mode"] = render_mode
         env = gym.make(env_id, **kwargs)
+
+    elif "antmaze" in env_id.lower():
+        kwargs = dict(
+            include_cfrc_ext_in_observation= not args.exclude_contact_forces,
+        )
+        if render_mode is not None:
+            kwargs["render_mode"] = render_mode
+        env = gym.make(env_id, **kwargs)
+        print(env.observation_space)
+    
     else:
         if render_mode is None:
             env = gym.make(env_id)

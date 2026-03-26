@@ -12,7 +12,6 @@ import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 from mpo.algorithm.__init__ import MPO
-from buffer.replaybuffer import ReplayBuffer
 from runners.rollout import collect_rollout
 from runners.video_rollout import log_one_episode_video
 from runners.evaluation import evaluate
@@ -29,7 +28,7 @@ def MPO_Learner_E_Step(
         train_env, 
         eval_env,
         device: torch.device,
-        replaybuffer: ReplayBuffer,
+        replaybuffer,
         mpo: MPO,
         writer: SummaryWriter,
         ):

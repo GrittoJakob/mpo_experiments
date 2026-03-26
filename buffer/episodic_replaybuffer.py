@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from types import deque
+from collections import deque 
 
 
 
@@ -14,8 +14,8 @@ class EpisodicReplayBuffer:
     - Sampling returns full episodes or n-steps (defined in the input)
     """
 
-    def __init__(self, capacity_steps, obs_dim, action_dim, buffer_device="cpu"):
-        self.capacity = capacity_steps
+    def __init__(self, capacity, obs_dim, action_dim, buffer_device="cpu"):
+        self.capacity = capacity
 
         if buffer_device == "cuda" and torch.cuda.is_available():
             self.device = "cuda"
@@ -104,7 +104,7 @@ class EpisodicReplayBuffer:
         all_rewards = torch.cat([ep["rewards"] for ep in self.episodes], dim=0)
         return all_rewards.mean().item()
     
-    def sample_n_step_batch(self, batch_size, num_steps):
+    def sample_n_step_batch(self, batch_size, num_steps= 2):
       
       if len(self.episodes) == 0:
           raise ValueError("Cannot sample from an empty buffer")
