@@ -37,6 +37,7 @@ ExperimentArgs = Union[
 ]
 
 def make_envs(args, run_name):
+
     train_env = make_train_vec_env(
         args,
         args.env_id,
@@ -45,7 +46,7 @@ def make_envs(args, run_name):
     )
     
     eval_env = make_eval_env(args, args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
-    if 
+    
     args.obs_dim   = int(np.prod(train_env.single_observation_space.shape))
     args.action_dim  = int(np.prod(train_env.single_action_space.shape))
     args.action_space_low = train_env.action_space.low
@@ -74,10 +75,10 @@ def make_replaybuffer(args):
     else: 
         device_buffer = "cpu"
     
-    if args.episodic_replay_buffer:
+    if args.episodic_replaybuffer:
         replaybuffer = EpisodicReplayBuffer(args.max_bufffer_capacity, args.obs_dim, args.action_dim, device_buffer)
     else:
-        replaybuffer = ReplayBuffer(args.capacity, args.obs_dim, args.action_dim, device_buffer)
+        replaybuffer = ReplayBuffer(args.max_buffer_capacity, args.obs_dim, args.action_dim, device_buffer)
     
     return replaybuffer
      

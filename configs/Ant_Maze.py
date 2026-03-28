@@ -6,12 +6,13 @@ class Ant_Maze_Args(BaseArgs):
 
     # Environment
 
-    env_id: str = "AntMaze_UMaze-v5"
+    env_id: str = "AntMaze_UMazeDense-v5"
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
     exclude_contact_forces: bool = True
     """exlude contact forces"""
+    reward: str = "dense"
 
     # Actor & Critic
     hidden_size_actor: int = 128

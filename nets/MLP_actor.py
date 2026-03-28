@@ -54,13 +54,12 @@ class Actor(nn.Module):
         
         #Mean Head
         mean = self.mean_layer(preprocessing)   # (B, dim_action)
-        high = torch.as_tensor(self.action_space_high, device=mean.device, dtype=mean.dtype)
-        mean = mean * high
 
         # Only if flag is true in input args(recommended)
         if self.use_tanh_on_mean:
             mean = self.activation_layer_mean(mean)     # (B, dim_action)
-        
+            high = torch.as_tensor( self.action_space_high, device=mean.device, dtype=mean.dtype).reshape(-1)
+            mean = mean * high
         # State dependant variance layer
         std = F.softplus(self.std_layer(preprocessing))    # (B, dim_action)
 
