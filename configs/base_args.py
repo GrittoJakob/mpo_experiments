@@ -17,9 +17,9 @@ class BaseArgs:
     # Logging
     wandb_track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "MPO_Ant"
+    wandb_project_name: str = "MPO_TRL"
     """the wandb's project name"""
-    wandb_entity: Optional[str] = "fsandco"
+    wandb_entity: Optional[str] = "jakobs_experiments"
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""

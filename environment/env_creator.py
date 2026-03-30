@@ -6,7 +6,7 @@ import gymnasium as gym
 import gymnasium_robotics
 from gymnasium.wrappers import TransformObservation
 gym.register_envs(gymnasium_robotics)
-from .helper_function import wrap_task_for_robust_ant, stack_maze_observation, NegativeDistanceRewardWrapper
+from .helper_function import wrap_task_for_robust_ant#, stack_maze_observation 
 
 
 """
@@ -35,25 +35,26 @@ def _make_base_env(env_id: str, args, render_mode: Optional[str] = None):
         env = wrap_task_for_robust_ant(env, args, eval_env = True)
     
     elif "maze" in env_id.lower():
-        # Sparse or dense rewards in maze
-        kwargs = dict(
-            reward_type = args.reward,
-            include_cfrc_ext_in_observation = args.use_contact_forces
-        )
+        
+        kwargs = {}
+
+        # exclude contact forces in ant env
+        if "ant" in env_id.lower():
+            kwargs = dict(
+                include_cfrc_ext_in_observation = args.use_contact_forces
+            )
         if render_mode is not None:
             kwargs["render_mode"] = render_mode
-        env = gym.make(env_id, **kwargs)
-         
-        # Wrap observations and rewards
-        if args.reward == "dense":
-            env = NegativeDistanceRewardWrapper(env)
-        env = stack_maze_observation(env)
+        env = gym.make(env_id, **kwargs)        
+        # env = stack_maze_observation(env)
     else:
         if render_mode is None:
             env = gym.make(env_id)
         else:
             env = gym.make(env_id, render_mode=render_mode)
 
+    print ("env:", env)
+    print("obs: ", env.observation_space)
     return env
 
 

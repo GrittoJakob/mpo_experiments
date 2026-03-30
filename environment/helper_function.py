@@ -9,50 +9,50 @@ import numpy as np
 from gymnasium import spaces
 
 
-def stack_maze_observation(env):
-    obs_space = env.observation_space
+# def stack_maze_observation(env):
+#     obs_space = env.observation_space
 
-    if not isinstance(obs_space, spaces.Dict):
-        return env
+#     if not isinstance(obs_space, spaces.Dict):
+#         return env
 
-    required_keys = ("observation", "achieved_goal", "desired_goal")
-    if not all(k in obs_space.spaces for k in required_keys):
-        return env
+#     required_keys = ("observation", "achieved_goal", "desired_goal")
+#     if not all(k in obs_space.spaces for k in required_keys):
+#         return env
 
-    obs_box = obs_space["observation"]
-    achieved_box = obs_space["achieved_goal"]
-    goal_box = obs_space["desired_goal"]
+#     obs_box = obs_space["observation"]
+#     achieved_box = obs_space["achieved_goal"]
+#     goal_box = obs_space["desired_goal"]
 
-    new_low = np.concatenate([
-        np.asarray(obs_box.low, dtype=np.float32).reshape(-1),
-        np.asarray(achieved_box.low, dtype=np.float32).reshape(-1),
-        np.asarray(goal_box.low, dtype=np.float32).reshape(-1),
-    ])
+#     new_low = np.concatenate([
+#         np.asarray(obs_box.low, dtype=np.float32).reshape(-1),
+#         np.asarray(achieved_box.low, dtype=np.float32).reshape(-1),
+#         np.asarray(goal_box.low, dtype=np.float32).reshape(-1),
+#     ])
 
-    new_high = np.concatenate([
-        np.asarray(obs_box.high, dtype=np.float32).reshape(-1),
-        np.asarray(achieved_box.high, dtype=np.float32).reshape(-1),
-        np.asarray(goal_box.high, dtype=np.float32).reshape(-1),
-    ])
+#     new_high = np.concatenate([
+#         np.asarray(obs_box.high, dtype=np.float32).reshape(-1),
+#         np.asarray(achieved_box.high, dtype=np.float32).reshape(-1),
+#         np.asarray(goal_box.high, dtype=np.float32).reshape(-1),
+#     ])
 
-    new_obs_space = spaces.Box(
-        low=new_low,
-        high=new_high,
-        dtype=np.float32,
-    )
+#     new_obs_space = spaces.Box(
+#         low=new_low,
+#         high=new_high,
+#         dtype=np.float32,
+#     )
 
-    def _stack_obs(obs):
-        return np.concatenate([
-            np.asarray(obs["observation"], dtype=np.float32).reshape(-1),
-            np.asarray(obs["achieved_goal"], dtype=np.float32).reshape(-1),
-            np.asarray(obs["desired_goal"], dtype=np.float32).reshape(-1),
-        ])
+#     def _stack_obs(obs):
+#         return np.concatenate([
+#             np.asarray(obs["observation"], dtype=np.float32).reshape(-1),
+#             np.asarray(obs["achieved_goal"], dtype=np.float32).reshape(-1),
+#             np.asarray(obs["desired_goal"], dtype=np.float32).reshape(-1),
+#         ])
 
-    return TransformObservation(
-        env,
-        _stack_obs,
-        observation_space=new_obs_space,
-    )
+#     return TransformObservation(
+#         env,
+#         _stack_obs,
+#         observation_space=new_obs_space,
+#     )
 
 
 
