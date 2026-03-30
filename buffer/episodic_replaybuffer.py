@@ -29,12 +29,9 @@ class EpisodicReplayBuffer:
         self.episodes = deque()
 
         # Number of currently stored timesteps across all episodes
-        self.total_steps = 0
-     
-    def get_episode_length(self, episode):
-        return episode["obs"].shape[0]
+        self.total_steps = 0   
 
-    def add_episode_batch(self, obs, actions, next_obs, rewards, terminated, truncated):
+    def add_batch(self, obs, actions, next_obs, rewards, terminated, truncated):
         """
         Add one COMPLETE episode at once.
         Shape: [T, ...]
@@ -71,40 +68,7 @@ class EpisodicReplayBuffer:
         self.episodes.append(episode)
         self.total_steps += ep_len
 
-    def sample_episodes_batch(self, batch_size):
-        
-        if len(self.episodes) == 0:
-            raise ValueError("Cannot sample from an empty EpisodicReplayBuffer")
-
-        idx = torch.randint(0, len(self.episodes), (batch_size,), device = self.device)
-        sampled_episodes = [self.episodes[i] for i in idx.tolist()]
-
-        batch = {
-            "obs": [ep["obs"] for ep in sampled_episodes],
-            "actions": [ep["actions"] for ep in sampled_episodes],
-            "next_obs": [ep["next_obs"] for ep in sampled_episodes],
-            "rewards": [ep["rewards"] for ep in sampled_episodes],
-            "truncated": [ep["truncated"] for ep in sampled_episodes],
-            "terminated": [ep["terminated"] for ep in sampled_episodes],
-        }
-
-        return batch
-
-
-    def num_episodes(self):
-        return len(self.episodes)
-
-    def num_steps(self):
-        return self.total_steps
-
-    def mean_reward(self):
-        if len(self.episodes) == 0:
-            return 0.0
-
-        all_rewards = torch.cat([ep["rewards"] for ep in self.episodes], dim=0)
-        return all_rewards.mean().item()
-    
-    def sample_n_step_batch(self, batch_size, num_steps= 2):
+    def sample_batch(self, batch_size, num_steps: int = 1, flat_batch: bool = True):
       
       if len(self.episodes) == 0:
           raise ValueError("Cannot sample from an empty buffer")
@@ -154,4 +118,24 @@ class EpisodicReplayBuffer:
           "truncated": torch.stack(truncated, dim=0),     # [B, num_steps, 1]
       }
 
+      if num_steps == 1 and flat_batch: 
+          batch = {key: idx.squeeze(1) for key, idx in batch.items()}
+
       return batch
+
+
+    def num_episodes(self):
+        return len(self.episodes)
+
+    def __len__(self):
+        return self.total_steps
+
+    def mean_reward(self):
+        if len(self.episodes) == 0:
+            return 0.0
+
+        all_rewards = torch.cat([ep["rewards"] for ep in self.episodes], dim=0)
+        return all_rewards.mean().item()
+    
+    def get_episode_length(self, episode):
+        return episode["obs"].shape[0]

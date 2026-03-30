@@ -38,7 +38,7 @@ def collect_rollout(env, state, args, actor, replaybuffer, device):
 
             # Step
             next_states, rewards, terminated, truncated, infos = env.step(actions)
-            
+
             # Handle dones and final observation for async vector env:
             # If terminated or truncated: get next_obs from final_observations
             done_mask = np.logical_or(terminated, truncated)

@@ -1,11 +1,12 @@
 import torch
 from typing import Optional
 import os
+import numpy as np
 import gymnasium as gym
 import gymnasium_robotics
 from gymnasium.wrappers import TransformObservation
 gym.register_envs(gymnasium_robotics)
-from .helper_function import wrap_task_for_robust_ant, stack_maze_observation
+from .helper_function import wrap_task_for_robust_ant, stack_maze_observation, NegativeDistanceRewardWrapper
 
 
 """
@@ -30,21 +31,29 @@ def _make_base_env(env_id: str, args, render_mode: Optional[str] = None):
         if render_mode is not None:
             kwargs["render_mode"] = render_mode
         env = gym.make(env_id, **kwargs)
+        # Wrap observations and rewards
+        env = wrap_task_for_robust_ant(env, args, eval_env = True)
     
     elif "maze" in env_id.lower():
         # Sparse or dense rewards in maze
         kwargs = dict(
-            reward_type = args.reward
+            reward_type = args.reward,
+            include_cfrc_ext_in_observation = args.use_contact_forces
         )
         if render_mode is not None:
             kwargs["render_mode"] = render_mode
         env = gym.make(env_id, **kwargs)
-
+         
+        # Wrap observations and rewards
+        if args.reward == "dense":
+            env = NegativeDistanceRewardWrapper(env)
+        env = stack_maze_observation(env)
     else:
         if render_mode is None:
             env = gym.make(env_id)
         else:
             env = gym.make(env_id, render_mode=render_mode)
+
     return env
 
 
@@ -52,18 +61,13 @@ def make_train_single_env(args, env_id, seed, *, rank: Optional[int] = None, spl
     
     env = _make_base_env(env_id, args, render_mode=None)
 
-    if env_id == "Ant-v5":
-        env = wrap_task_for_robust_ant(env, args, rank=rank, split_idx=split_idx)
-    
-    if "maze" in env_id.lower():
-        env = stack_maze_observation(env)
-   
     env.reset(seed=seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.ClipAction(env)
+
     return env
 
 def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="rollout"):
@@ -80,11 +84,7 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
     else:
         env = _make_base_env(env_id, args, render_mode=None)
         
-    if args.env_id == "Ant-v5":
-        env = wrap_task_for_robust_ant(env, args, eval_env = True)
 
-    if "maze" in env_id.lower():
-        env = stack_maze_observation(env)
 
     env.action_space.seed(seed_offset)
     env.observation_space.seed(seed_offset)

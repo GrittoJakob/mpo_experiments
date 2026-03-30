@@ -43,7 +43,7 @@ class BaseArgs:
     """desired std for actor inialization on diagonal"""
     clip_to_env: bool = True
     """whether to use action clipping in rollout to save clipped action or not"""
-    use_tanh_on_mean:bool = False
+    use_tanh_on_mean:bool = True
     """use tanh on mean in actor after last layer"""    
     target_update_period: int = 200
     "number of Q-updates steps per new target init"

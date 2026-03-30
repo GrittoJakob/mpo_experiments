@@ -10,7 +10,7 @@ class Ant_Maze_Args(BaseArgs):
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
-    exclude_contact_forces: bool = True
+    use_contact_forces: bool = False
     """exlude contact forces"""
     reward: str = "dense"
 
@@ -36,5 +36,5 @@ class Ant_Maze_Args(BaseArgs):
     """batch size used when sampling from replay buffer"""
     max_buffer_capacity: int = 100000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
-    episodic_replaybuffer: bool = False
+    episodic_replaybuffer: bool = True
     """flag for using an episodic replaybuffer for sequential storage of env steps"""

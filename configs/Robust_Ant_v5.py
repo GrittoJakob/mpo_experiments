@@ -6,7 +6,7 @@ from .base_args import BaseArgs
 class Robust_Ant_Args(BaseArgs):
 
     # Environment
-    env_id: str = "Pendulum-v1"
+    env_id: str = "Ant-v5"
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
@@ -119,7 +119,7 @@ class Robust_Ant_Args(BaseArgs):
     # ========================================= 
     eval_e_step: int = 3
     """how often to evaluate E-step distribution"""
-    use_e_step_eval: bool = True
+    use_e_step_eval: bool = False
     """Flag for using new MPO_Learner for E-step evaluation"""
     sample_action_num_for_dist_eval: int = 32
     """how many samples for e-step evaluation"""

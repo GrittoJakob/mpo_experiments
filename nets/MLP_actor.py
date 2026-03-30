@@ -55,10 +55,12 @@ class Actor(nn.Module):
         #Mean Head
         mean = self.mean_layer(preprocessing)   # (B, dim_action)
 
-        # Only if flag is true in input args(recommended)
+        # Only if flag is true in input args (recommended)
         if self.use_tanh_on_mean:
             mean = self.activation_layer_mean(mean)     # (B, dim_action)
-            high = torch.as_tensor( self.action_space_high, device=mean.device, dtype=mean.dtype).reshape(-1)
+            high = torch.as_tensor(self.action_space_high, device=mean.device, dtype=mean.dtype).view(1, -1)
+            assert torch.isfinite(high).all(), f"non-finite action high: {high}"
+            assert high.shape[-1] == mean.shape[-1], f"high shape: {high.shape}, mean shape:  {mean.shape}"
             mean = mean * high
         # State dependant variance layer
         std = F.softplus(self.std_layer(preprocessing))    # (B, dim_action)
@@ -87,7 +89,7 @@ class Actor(nn.Module):
         with torch.no_grad():
             # Get action distribution and batch status
             action_distribution, mean, _ = self.get_action_distribution(state)
-            
+
             # Action sampling (deterministic in eval mode)
             if deterministic:
                 action = mean
@@ -102,7 +104,8 @@ class Actor(nn.Module):
             
             # Ensure action dimension
             if state.ndim == 1:             # (dim_action)
-                action = action.squeeze(1)
+                action = action.squeeze(0)
+
 
         return action.cpu().numpy()
 

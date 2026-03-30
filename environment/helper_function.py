@@ -122,3 +122,14 @@ def wrap_task_for_robust_ant(
                 env = RAOActionWrapper(env, noise_limit)
 
     return env
+
+
+class NegativeDistanceRewardWrapper(gym.Wrapper):
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        ag = np.asarray(obs["achieved_goal"], dtype=np.float32)
+        dg = np.asarray(obs["desired_goal"], dtype=np.float32)
+        reward = -float(np.linalg.norm(ag - dg))
+
+        return obs, reward, terminated, truncated, info

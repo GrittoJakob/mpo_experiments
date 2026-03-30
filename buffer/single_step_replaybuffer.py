@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from typing import Optional
 
 
 class ReplayBuffer:
@@ -78,8 +79,10 @@ class ReplayBuffer:
         self.pointer = (self.pointer + batch_size) % self.capacity
         self.size = min(self.size + batch_size, self.capacity)
 
-    def sample_batch(self, batch_size):
+    def sample_batch(self, batch_size, num_steps: Optional[int] = 1, flat_batch: Optional[bool] = True):
 
+        assert num_steps == 1, f"For using more than one steps from buffer, please use episodic replaybuffer in args"
+        
         if self.size == 0:
             raise ValueError("Can not sample from an empty ReplayBuffer")
         

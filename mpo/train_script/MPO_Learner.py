@@ -39,7 +39,7 @@ def MPO_Learner(
 
     state, _ = train_env.reset()
     num_steps = 0
-    it = 1
+    it = 0
     grad_updates = 0 
     
     # Warm-up: fill replay buffer with some initial experience

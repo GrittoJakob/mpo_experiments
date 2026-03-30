@@ -5,37 +5,17 @@ import glob
 import wandb
 import numpy as np
 import time
-import math
 
-def _extract_xy_from_info_or_env(info, env):
-    """Gibt (x, y) zurück. Erst aus info, sonst aus Mujoco, sonst (nan, nan)."""
-    x = info.get("x_position", None)
-    y = info.get("y_position", None)
 
-    if x is not None and y is not None:
-        return float(x), float(y)
 
-    # Manche Envs haben nur x_position
-    if x is not None and y is None:
-        return float(x), float("nan")
-
-    # Fallback: Mujoco qpos (wenn vorhanden)
-    try:
-        data = env.unwrapped.data
-        qpos = data.qpos
-        # meist: qpos[0]=x, qpos[1]=y
-        return float(qpos[0]), float(qpos[1]) if len(qpos) > 1 else float("nan")
-    except Exception:
-        return float("nan"), float("nan")
 
 def log_one_episode_video(args, actor, device, name_prefix, global_steps):
     video_folder = os.path.join(args.video_dir, args.run_name)
     os.makedirs(video_folder, exist_ok=True)
 
-    max_steps = getattr(args, "evaluate_episode_maxstep", getattr(args, "video_max_steps", 1000))
-
-    # ---- pick exactly 2 tasks ----
-    if args.task_mode in ("inverted", "inverted_multi_task"):
+    # Task modes
+    task_mode = getattr(args, "task_mode", "default")
+    if task_mode in ("inverted", "inverted_without_task_hint"):
         task_options = [{"task_mode": 1.0}, {"task_mode": -1.0}]
         task_names   = ["forward", "backward"]
     else:
@@ -52,54 +32,32 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
         venv = make_video_env(args, args.run_name, prefix)
         total_reward, steps = 0.0, 0
 
-        x_pos, y_pos = [], []
-        x_goal, y_goal = [], []
-
         try:
             actor.eval()
 
             if env_options is None:
-                state, info0 = venv.reset()
+                state, _ = venv.reset()
             else:
-                state, info0 = venv.reset(options=env_options)
+                state, _ = venv.reset(options=env_options)
 
-            done = False
             with torch.no_grad():
-                while (not done) and (steps < max_steps):
-                    st = torch.as_tensor(state, dtype=torch.float32, device=device)
-                    action = actor.action(st, deterministic=True)
+                while True:
+                    states = torch.as_tensor(state, dtype=torch.float32, device=device)
+                    action = actor.action(states, deterministic=True)
+                    state, reward, terminated, truncated, info = venv.step(action)
 
-                    # robust: action -> numpy
-                    if torch.is_tensor(action):
-                        action_np = action.detach().cpu().numpy()
-                    else:
-                        action_np = np.asarray(action)
-
-                    state, reward, terminated, truncated, info = venv.step(action_np)
-
-                    # goals: nur wenn vorhanden, sonst NaN
-                    x_goal.append(float(info.get("goal_x", float("nan"))))
-                    y_goal.append(float(info.get("goal_y", float("nan"))))
-
-                    # positions: robust extrahieren
-                    x, y = _extract_xy_from_info_or_env(info, venv)
-                    x_pos.append(x)
-                    y_pos.append(y)
+                    total_reward += reward
+                    steps += 1 
 
                     done = bool(terminated or truncated)
-                    total_reward += float(reward)
-                    steps += 1
-
+        
+                    if done: 
+                        break
+                    
         finally:
             actor.train()
             venv.close()
 
-        # best trajectory über Tasks hinweg merken
-        if total_reward > best_reward:
-            best_reward = total_reward
-            best_trajectory = list(zip(x_goal, y_goal, x_pos, y_pos))
-
-        # Neue mp4 finden
         mp4 = None
         for _ in range(10):
             after = set(glob.glob(os.path.join(video_folder, f"{prefix}*.mp4")))
@@ -122,7 +80,6 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
                 f"rollout/video_{i}_return": total_reward,
                 f"rollout/video_{i}_len": steps,
                 f"rollout/video_{i}_task": task_name,
-                # optional: wenn dein Wrapper es setzt
                 f"rollout/video_{i}_task_direction": (1.0 if task_name == "forward" else -1.0),
             },
             step=global_steps,

@@ -11,12 +11,13 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     Run evaluation episodes using the current policy (self.actor)
     and return the average total reward per episode.
     """
-
-    if args.task_mode in ["inverted_without_task_hint"]:
+    task_mode = getattr(args, "task_mode", "default")
+    rand_mode = getattr(args, "rand_mode", "default")
+    if task_mode in ["inverted_without_task_hint"]:
         return evaluate_inverted_goal(args, actor, eval_env, writer, device, global_step)
-    elif args.task_mode in ("target_goal"):
+    elif task_mode in ("target_goal"):
         return evaluate_target_goal(args, actor, eval_env, writer, device, global_step)
-    elif args.rand_mode == "ERFI":
+    elif rand_mode == "ERFI":
         return evaluate_erfi(args, actor, eval_env, writer, device, global_step)
 
     
