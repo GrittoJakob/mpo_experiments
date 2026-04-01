@@ -61,7 +61,7 @@ class Robust_Ant_Args(BaseArgs):
     - 'inverted_without_task_hint': meta-learning test, run only in two directions without task hint
     - 'target_goal': move to target XY position, with task hint
     """
-    include_cfrc_ext_in_observation: bool = True
+    include_cfrc_ext_in_observation: bool = False
     """Whether to include external contact force terms in the observation."""
 
     # ============================

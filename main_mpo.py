@@ -19,7 +19,7 @@ import gymnasium as gym
 from typing import Union, Annotated
 from nets.MLP_actor import Actor
 from nets.MLP_critic import Critic
-from environment.env_creator import limit_threads, make_eval_env, make_train_vec_env, _make_base_env
+from environment.base_env_creator import limit_threads, make_eval_env, make_train_vec_env, make_base_env
 from buffer.single_step_replaybuffer import ReplayBuffer
 from buffer.episodic_replaybuffer import EpisodicReplayBuffer
 from configs.Robust_Ant_v5 import Robust_Ant_Args
@@ -46,11 +46,11 @@ def make_envs(args, run_name):
     )
     
     eval_env = make_eval_env(args, args.env_id, args.seed, capture_video = False, run_name = run_name, name_prefix = "eval")
-    
+    print("Env:", train_env)
     args.obs_dim   = int(np.prod(train_env.single_observation_space.shape))
     args.action_dim  = int(np.prod(train_env.single_action_space.shape))
     
-    test_env = _make_base_env(args.env_id, args, render_mode=None)
+    test_env = make_base_env(args.env_id, args, render_mode=None)
     args.action_space_low = test_env.action_space.low.copy()
     args.action_space_high = test_env.action_space.high.copy()
     test_env.close()

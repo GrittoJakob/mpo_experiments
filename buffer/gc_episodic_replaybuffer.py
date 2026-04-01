@@ -33,10 +33,10 @@ class EpisodicReplayBuffer:
 
     def add_batch(self, obs, actions, next_obs, rewards, terminated, truncated):
         """
-        Add one COMPLETE episode at once, but ONLY one.
+        Add one COMPLETE episode at once.
         Shape: [T, ...]
+        
         """
-
         obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(actions, dtype=torch.float32, device=self.device)
         next_obs = torch.as_tensor(next_obs, dtype=torch.float32, device=self.device)

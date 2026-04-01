@@ -10,7 +10,7 @@ class Ant_Maze_Args(BaseArgs):
     """gym environment name (used in gym.make)"""
     seed: int = 1
     """seed of the experiment"""
-    use_contact_forces: bool = False
+    include_cfrc_ext_in_observation: bool = False
     """exlude contact forces"""
 
 

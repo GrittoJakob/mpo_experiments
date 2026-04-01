@@ -97,9 +97,9 @@ class ReplayBuffer:
             "terminated": self.terminated[idx]
         }
 
-        return batch
-    
-    # Statistics
+        return batch   
+
+    # Data Analytics
     def __len__(self):
         return self.size
     

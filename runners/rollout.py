@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 
-def collect_rollout(env, state, args, actor, replaybuffer, device):
+def collect_rollout(env, state, unfinished_episodes, args, actor, replaybuffer, device):
     """
     Collect rollout steps with the current policy and store them in the replay buffer.
 
@@ -11,20 +11,24 @@ def collect_rollout(env, state, args, actor, replaybuffer, device):
         (obs, action, next_obs, reward, terminated, truncated)
 
     Returns:
-        next_state: latest env state after rollout
+        dict of unfinished episodes: latest env state after rollout
         total_steps_collected: number of collected environment steps
     """
 
     num_envs = env.num_envs
     T = args.sample_steps_per_iter
     total_steps_collected = 0
+    
+    # For first init of unfinished episodes
+    if unfinished_episodes is None:
+        unfinished_episodes = [empty_episode() for _ in range(num_envs)]
 
-    obs_buf = np.empty((T, num_envs, args.obs_dim), dtype=np.float32)
-    actions_buf = np.empty((T, num_envs, args.action_dim), dtype=np.float32)
-    next_obs_buf = np.empty((T, num_envs, args.obs_dim), dtype=np.float32)
-    rewards_buf = np.empty((T, num_envs), dtype=np.float32)
-    terminated_buf = np.empty((T, num_envs), dtype=np.float32)
-    truncated_buf = np.empty((T, num_envs), dtype=np.float32)
+    # Check shapes
+    assert len(unfinished_episodes) == num_envs, (
+        f"unfinished_episodes must have length {num_envs}, "
+        f"got {len(unfinished_episodes)}"
+    )
+
     actor.eval()
     
     with torch.no_grad():
@@ -47,38 +51,51 @@ def collect_rollout(env, state, args, actor, replaybuffer, device):
             real_next_obs = next_states.copy()
 
             if "final_observation" in infos:
-                for idx_env, done in enumerate(done_mask):
+                for env_idx, done in enumerate(done_mask):
                     if done:
-                        real_next_obs[idx_env] = infos["final_observation"][idx_env] 
+                        real_next_obs[env_idx] = infos["final_observation"][env_idx] 
 
 
-            obs_buf[step] = state
-            actions_buf[step] = actions
-            next_obs_buf[step] = real_next_obs
-            rewards_buf[step] = rewards
-            terminated_buf[step] = terminated.astype(np.float32)
-            truncated_buf[step] = truncated.astype(np.float32)
-            
+            for env_idx in range(num_envs):
+                        
+                        # Iterate over environments
+                        ep = unfinished_episodes[env_idx]
+
+                        ep["obs"].append(state[env_idx].copy())
+                        ep["actions"].append(actions[env_idx].copy())
+                        ep["next_obs"].append(real_next_obs[env_idx].copy())
+                        ep["rewards"].append(rewards[env_idx])
+                        ep["terminated"].append(terminated[env_idx])
+                        ep["truncated"].append(truncated[env_idx])
+
+                        if done_mask[env_idx]:
+
+                            replaybuffer.add_batch(
+                                obs=np.asarray(ep["obs"], dtype=np.float32),
+                                actions=np.asarray(ep["actions"], dtype=np.float32),
+                                next_obs=np.asarray(ep["next_obs"], dtype=np.float32),
+                                rewards=np.asarray(ep["rewards"], dtype=np.float32),
+                                terminated=np.asarray(ep["terminated"], dtype=np.float32),
+                                truncated=np.asarray(ep["truncated"], dtype=np.float32),
+                            )
+                            # Clearn finished epsiode again
+                            unfinished_episodes[env_idx] = empty_episode()
+
             state = next_states
             total_steps_collected += num_envs
 
     actor.train()
 
-    # Flatten for Buffer
-    obs_flat = obs_buf.reshape(T * num_envs, args.obs_dim)
-    actions_flat = actions_buf.reshape(T * num_envs, args.action_dim)
-    next_obs_flat = next_obs_buf.reshape(T * num_envs, args.obs_dim)
-    rewards_flat = rewards_buf.reshape(T * num_envs, 1)
-    truncated_flat = truncated_buf.reshape(T * num_envs, 1)
-    terminated_flat = terminated_buf.reshape(T * num_envs, 1)
+    return state, unfinished_episodes, total_steps_collected
 
-    replaybuffer.add_batch(
-        obs = obs_flat,
-        actions = actions_flat,
-        next_obs = next_obs_flat,
-        rewards = rewards_flat,
-        terminated = terminated_flat,
-        truncated = truncated_flat
-    )
 
-    return state, total_steps_collected
+def empty_episode():
+    return {
+        "obs": [],
+        "actions": [],
+        "next_obs": [],
+        "rewards": [],
+        "terminated": [],
+        "truncated": [],
+    }
+

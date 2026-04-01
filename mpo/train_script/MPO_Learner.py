@@ -38,13 +38,14 @@ def MPO_Learner(
     """
 
     state, _ = train_env.reset()
+    unfinished_episodes = None
     num_steps = 0
     it = 0
     grad_updates = 0 
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
-        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer, device)
+        state, unfinished_episodes, new_steps = collect_rollout(train_env, state, unfinished_episodes,args, mpo.actor, replaybuffer, device)
         num_steps += new_steps
 
     
@@ -53,7 +54,7 @@ def MPO_Learner(
     while num_steps < args.max_training_steps:
 
         # Collect fresh experience for this iteration
-        state, new_steps = collect_rollout(train_env, state, args, mpo.actor, replaybuffer, device)
+        state, unfinished_episodes, new_steps = collect_rollout(train_env, state, unfinished_episodes, args, mpo.actor, replaybuffer, device)
 
         #Update current steps for while loop
         num_steps += new_steps
