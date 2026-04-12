@@ -8,7 +8,7 @@ import time
 
 
 
-def log_one_episode_video(args, actor, device, name_prefix, global_steps):
+def log_one_episode_video(args, actor, device, name_prefix, grad_updates):
     
     # Video folder
     video_folder = os.path.join(args.video_dir, args.run_name)
@@ -23,9 +23,6 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
         task_options = [None]
         task_names   = ["task1"]
 
-    best_reward = -float("inf")
-    best_trajectory = None
-
     for i, (env_options, task_name) in enumerate(zip(task_options, task_names), start=1):
         prefix = f"{name_prefix}_video{i}" if name_prefix else f"video_{i}"
         before = set(glob.glob(os.path.join(video_folder, f"{prefix}*.mp4")))
@@ -35,7 +32,7 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
 
         try:
             actor.eval()
-
+            done = False
             if env_options is None:
                 state, _ = venv.reset()
             else:
@@ -84,7 +81,7 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
                     f"rollout/video_{i}_task": task_name,
                     f"rollout/video_{i}_task_direction": (1.0 if task_name == "forward" else -1.0),
                 },
-                step=global_steps,
+                step=grad_updates,
             )
 
         try:

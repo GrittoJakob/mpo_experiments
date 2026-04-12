@@ -56,7 +56,7 @@ def MPO_Learner(
         # Capture Video        
         if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
-            log_one_episode_video(args, mpo.actor, device, prefix, num_steps)
+            log_one_episode_video(args, mpo.actor, device, prefix, grad_updates)
 
         # For terminal logging
         pbar.update(new_steps)

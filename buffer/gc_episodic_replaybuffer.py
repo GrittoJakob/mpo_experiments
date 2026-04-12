@@ -4,7 +4,7 @@ from collections import deque
 
 
 
-class EpisodicReplayBuffer:
+class GoalConditioned_EpisodicReplayBuffer:
     """
     Simple episodic replay buffer.
 

@@ -63,7 +63,7 @@ def make_eval_env(args, env_id, seed, capture_video, run_name, name_prefix="roll
     else:
         env = make_base_env(env_id, args, render_mode=None)
 
-    env.reset(seed= seed_offset)
+    #env.reset(seed= seed_offset)
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.ClipAction(env)

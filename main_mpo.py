@@ -151,7 +151,7 @@ def train():
             compile_mode=getattr(args, "compile_mode", "reduce-overhead"),
         )  
 
-    writer = init_writer(args)
+    writer, wandbrun = init_writer(args)
 
     if getattr(args, "use_e_step_eval", False):
         MPO_Learner_E_Step(args, train_env, eval_env, device, replaybuffer, mpo, writer)
