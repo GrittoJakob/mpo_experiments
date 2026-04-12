@@ -1,0 +1,21 @@
+# Shared setup for this repository
+# Covers both: robust_ant and ant_maze
+# Recommended Python version: 3.10
+
+numpy
+scipy
+tqdm
+tyro
+matplotlib
+
+torch
+
+gymnasium[mujoco]
+gymnasium-robotics
+mujoco
+
+wandb
+tensorboard
+moviepy
+imageio
+imageio-ffmpeg
