@@ -60,7 +60,7 @@ class BaseArgs:
     """flag for using action penalty"""
     eps_penalty:float = 1e-3
     """constrain for action penalty loss term"""
-    penalty_mix: float = 0.25
+    penalty_mix: float = 0.3
     """parameter for mixing dual_losses in E-Step (action penalty and normal dual loss)"""
     
     # M-Step

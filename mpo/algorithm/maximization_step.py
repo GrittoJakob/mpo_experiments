@@ -15,7 +15,7 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     mu_on, std_on = self.actor.forward(state_batch)      
 
     # Build both Distributions:
-    # Here we use the decoupled version of the Paper: arXiv:1812.02256v1  [cs.LG]  5 Dec 2018
+    # Here we use the decoupled version of the Paper: arXiv:1812.02256v1
     pi_1 = Independent(Normal(mu_on, std_off), 1)
     pi_2 = Independent(Normal(mu_off, std_on), 1)
     logp1 = pi_1.log_prob(sampled_actions)

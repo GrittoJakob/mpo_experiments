@@ -3,8 +3,6 @@ from .task_wrapper import GoalPositionWrapper
 from .meta_task_wrapper import Meta_InvertedWrapper 
 from .ERFI_Wrappers import RAOActionWrapper, RFIActionWrapper
 
-import numpy as np
-
 def make_ant_env(env_id, args, render_mode: None):
 
     # For custom designed reward function

@@ -81,24 +81,28 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
 
 def compute_weights_temperature_loss(temperature: torch.Tensor, values: torch.Tensor, epsilon: float):
     """
-    temperature: torch scalar, requires_grad=True
-    values: (N, B)  (No Gradients)
+    Implementation from Google Deepmind:
+    https://github.com/google-deepmind/acme/blob/master/acme/tf/losses/mpo.py
+    temperature: torch scalar
+    values: (N, B)
     epsilon: float
     returns:
     weights: (N, B) detached
     dual_loss: scalar tensor (has Grad wrt temperature)
     """
+
+    
     values = values.detach()  # stop grad for 
 
-    # weights (stop grad wrt temperature) 
+    # weights 
     tempered = values / temperature.detach()
     tempered = tempered - tempered.max(dim=0, keepdim=True).values  # stable
     weights = torch.softmax(tempered, dim=0).detach()
 
-    # dual loss (Grad wrt temperature) 
+    # dual loss 
     values_T = values.transpose(0, 1)  # (B, N)
     max_v = values_T.max(dim=1, keepdim=True).values  # (B, 1)
-    exp_term = torch.exp((values_T - max_v) / temperature)  # grad fließt in temperature
+    exp_term = torch.exp((values_T - max_v) / temperature)  
     log_mean_exp = torch.log(exp_term.mean(dim=1) + 1e-8)  # (B,)
 
     dual_loss = temperature * epsilon + max_v.mean() + temperature * log_mean_exp.mean()

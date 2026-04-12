@@ -39,9 +39,6 @@ def evaluate_target_goal(args, actor, eval_env, writer, device, global_step):
                 state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
                 action = actor.action(state_tensor, deterministic=True)
 
-                if args.use_action_clipping:
-                    action = np.clip(action, args.action_space_low, args.action_space_high)
-
                 action_list.append(action)
 
                 next_state, reward, terminated, truncated, info = eval_env.step(action)

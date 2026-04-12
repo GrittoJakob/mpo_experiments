@@ -1,7 +1,5 @@
-import gymnasium as gym
 import torch
 import numpy as np
-import options
 from runners.task_specific_evaluation_scripts.evaluation_inverted_goals import evaluate_inverted_goal
 from runners.task_specific_evaluation_scripts.evaluation_ERFI_noise import evaluate_erfi
 from runners.task_specific_evaluation_scripts.evaluation_target_goals import evaluate_target_goal
@@ -13,6 +11,7 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     """
     task_mode = getattr(args, "task_mode", "default")
     rand_mode = getattr(args, "rand_mode", "default")
+
     if task_mode in ["inverted_without_task_hint"]:
         return evaluate_inverted_goal(args, actor, eval_env, writer, device, global_step)
     elif task_mode in ("target_goal"):
@@ -48,7 +47,7 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
                     action = actor.action(state_tensor, deterministic = True)   # Already numpy 
                     action_list.append(action)
 
-                    # Step environment
+                    # Environment step
                     next_state, reward, terminated, truncated, info = eval_env.step(action)
     
                     done = terminated or truncated

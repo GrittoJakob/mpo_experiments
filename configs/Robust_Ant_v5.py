@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 from .base_args import BaseArgs
 
 @dataclass
@@ -28,12 +27,11 @@ class Robust_Ant_Args(BaseArgs):
     """Maximal number of env steps for training"""
 
     # Sampling / Replay Buffer
-
     batch_size: int = 256
     """batch size used when sampling from replay buffer"""
     max_buffer_capacity: int = 100000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
-    episodic_replaybuffer: bool = True
+    episodic_replaybuffer: bool = False
     """flag for using an episodic replaybuffer for sequential storage of env steps"""
 
     # =============================================================================================================================
@@ -101,7 +99,6 @@ class Robust_Ant_Args(BaseArgs):
     rand_mode: str = "default"
     """Environment parameter randomization mode.
     Currently supports:
-    - 'ERFI'
     - 'RAO'
     - 'RFI'
     - None: no parameter randomization

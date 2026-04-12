@@ -3,6 +3,7 @@ import numpy as np
 from typing import Optional
 
 # Task Wrappers from Ferdinand -> Thanks!
+
 # ==============================================================================
 # 1. RFI Wrapper (Step-wise Noise) - UPDATED
 # ==============================================================================

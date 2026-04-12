@@ -1,15 +1,7 @@
-import random
-import time
-import os
 import math
 from tqdm import tqdm
 from dataclasses import dataclass
-import numpy as np
-import gymnasium as gym
 import torch
-import torch.optim as optim
-import torch.nn as nn
-from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 from mpo.algorithm.__init__ import MPO
 from runners.rollout import collect_rollout
@@ -36,16 +28,18 @@ def MPO_Learner(
     - Runs MPO E-step and M-step (policy improvement).
     - Periodically evaluates and logs statistics.
     """
-
+    # Initialisation for rollout:
     state, _ = train_env.reset()
     unfinished_episodes = None
     num_steps = 0
+
+    # Iterators
     it = 0
     grad_updates = 0 
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
-        state, unfinished_episodes, new_steps = collect_rollout(train_env, state, unfinished_episodes,args, mpo.actor, replaybuffer, device)
+        state, unfinished_episodes, new_steps = collect_rollout(train_env, state, unfinished_episodes, args, mpo.actor, replaybuffer, device)
         num_steps += new_steps
 
     
@@ -63,7 +57,6 @@ def MPO_Learner(
         if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
             log_one_episode_video(args, mpo.actor, device, prefix, num_steps)
-
 
         # For terminal logging
         pbar.update(new_steps)
@@ -104,7 +97,9 @@ def MPO_Learner(
             )
 
             # Policy evaluation (critic update)
-            collect_stats = args.wandb_track and (i_update % args.log_period == 0) and (i_update & args.delay_policy_update == 0)
+            collect_stats = (args.wandb_track 
+                and (i_update % args.log_period == 0) 
+                and (i_update % args.delay_policy_update == 0))
             critic_update_stats = mpo.td_learning( 
                 next_target_q = next_target_q,
                 state_batch = obs_batch, 
@@ -135,7 +130,7 @@ def MPO_Learner(
                     collect_stats= collect_stats)
 
 
-            # logging 
+            # logging to wandb
             if args.wandb_track and (i_update % args.log_period == 0) and collect_stats:
                 logging_wandb(
                     writer = writer,

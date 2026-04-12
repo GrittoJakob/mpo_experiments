@@ -51,7 +51,7 @@ def evaluate_inverted_goal(args, actor, eval_env, writer, device, global_step):
                     task_reward = info['velocity_reward']
 
                     # Accumulate reward
-                    total_task_rewards = task_reward
+                    total_task_rewards += task_reward
                     total_reward += reward
                     if done:
                         break
@@ -81,5 +81,5 @@ def evaluate_inverted_goal(args, actor, eval_env, writer, device, global_step):
     writer.add_scalar("eval/episodic_return_task_backward", mean_return_task2, global_step)
     writer.add_scalar("eval/episodic_length_task_forward", float(np.mean(len_by_task[1.0])), global_step)
     writer.add_scalar("eval/episodic_length_task_backward", float(np.mean(len_by_task[-1.0])), global_step)
-    writer.add_scalar("eval/episodic_task_return_task_forward", mean_task_return_task1)
-    writer.add_scalar("eval/episodic_task_return_task_backward", mean_task_return_task2)
+    writer.add_scalar("eval/episodic_task_return_task_forward", mean_task_return_task1, global_step)
+    writer.add_scalar("eval/episodic_task_return_task_backward", mean_task_return_task2, global_step)

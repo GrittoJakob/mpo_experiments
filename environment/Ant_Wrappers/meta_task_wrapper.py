@@ -77,7 +77,7 @@ class Meta_InvertedWrapper(gym.Wrapper):
         unwrapped_env.set_state(qpos, qvel)
         obs = unwrapped_env._get_obs()  
 
-        # 🟢 History initialisieren: valid=0
+        # History initialisieren: valid=0
         self._hist_rewards.clear()
         self._hist_actions.clear()
         self._hist_valid.clear()
@@ -107,7 +107,7 @@ class Meta_InvertedWrapper(gym.Wrapper):
 
         total_reward = others + flipped_forward_rew
 
-        # 🟢 History updaten
+        # History updaten
         action_flat = np.asarray(action, dtype=np.float64).reshape(-1)
         rew_to_store = float(flipped_forward_rew if self.store_task_reward else total_reward)
 

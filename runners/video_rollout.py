@@ -3,13 +3,14 @@ import torch
 import os
 import glob
 import wandb
-import numpy as np
 import time
 
 
 
 
 def log_one_episode_video(args, actor, device, name_prefix, global_steps):
+    
+    # Video folder
     video_folder = os.path.join(args.video_dir, args.run_name)
     os.makedirs(video_folder, exist_ok=True)
 
@@ -74,20 +75,21 @@ def log_one_episode_video(args, actor, device, name_prefix, global_steps):
                 continue
             mp4 = mp4s[-1]
 
-        wandb.log(
-            {
-                f"rollout/video_{i}": wandb.Video(mp4, format="mp4"),
-                f"rollout/video_{i}_return": total_reward,
-                f"rollout/video_{i}_len": steps,
-                f"rollout/video_{i}_task": task_name,
-                f"rollout/video_{i}_task_direction": (1.0 if task_name == "forward" else -1.0),
-            },
-            step=global_steps,
-        )
+        if args.wandb_track:
+            wandb.log(
+                {
+                    f"rollout/video_{i}": wandb.Video(mp4, format="mp4"),
+                    f"rollout/video_{i}_return": total_reward,
+                    f"rollout/video_{i}_len": steps,
+                    f"rollout/video_{i}_task": task_name,
+                    f"rollout/video_{i}_task_direction": (1.0 if task_name == "forward" else -1.0),
+                },
+                step=global_steps,
+            )
 
         try:
             os.remove(mp4)
         except OSError:
             pass
 
-    return best_trajectory, best_reward
+    return

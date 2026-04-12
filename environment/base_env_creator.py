@@ -1,7 +1,5 @@
 import torch
-from typing import Optional
 import os
-import numpy as np
 import gymnasium as gym
 import gymnasium_robotics
 
