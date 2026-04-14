@@ -86,7 +86,7 @@ def make_optimizer(args, actor, critic):
     return actor_optimizer, critic_optimizer
 
 def train():
-    args = Robust_Ant_Args
+    args = tyro.cli(Robust_Ant_Args)
     try: 
         num_threads = int(_DEFAULT_THREADS)
     except ValueError:
