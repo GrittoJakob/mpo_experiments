@@ -33,6 +33,8 @@ def logging_wandb(writer, replaybuffer, stats_m_step, stats_e_step, critic_updat
         "m-step/C_sigma_mean": stats_m_step["C_sigma_mean"],
         "m-step/mu_mean": stats_m_step["mu_mean"],
         "m-step/std_mean": stats_m_step["std_mean"],
+        "m-step/eta_mu": stats_m_step["eta_mu"],
+        "m-step/eta_sigma": stats_m_step["eta_sigma"],
         "e-step/eta_dual": stats_e_step["eta_dual"],
         "e-step/loss_dual": stats_e_step["loss_dual"],
         "critic_update/q_loss": critic_update_stats["critic_loss"],

@@ -3,7 +3,6 @@ import torch
 from collections import deque 
 
 
-
 class GoalConditioned_EpisodicReplayBuffer:
     """
     Simple episodic replay buffer.
@@ -14,7 +13,7 @@ class GoalConditioned_EpisodicReplayBuffer:
     - Sampling returns full episodes or n-steps (defined in the input)
     """
 
-    def __init__(self, capacity, obs_dim, action_dim, buffer_device="cpu"):
+    def __init__(self, capacity, obs_wrapper, obs_dim, action_dim, buffer_device="cpu"):
         self.capacity = capacity
 
         if buffer_device == "cuda" and torch.cuda.is_available():
@@ -30,6 +29,8 @@ class GoalConditioned_EpisodicReplayBuffer:
 
         # Number of currently stored timesteps across all episodes
         self.total_steps = 0   
+
+        self.obs_wrapper = obs_wrapper
 
     def add_batch(self, obs, actions, next_obs, rewards, terminated, truncated):
         """
@@ -69,60 +70,107 @@ class GoalConditioned_EpisodicReplayBuffer:
         self.episodes.append(episode)
         self.total_steps += ep_len
 
-    def sample_batch(self, batch_size, num_steps: int = 1, flat_batch: bool = True):
-      
-      if len(self.episodes) == 0:
-          raise ValueError("Cannot sample from an empty buffer")
-      if num_steps <= 0:
-          raise ValueError("num_steps must be >= 1")
+    def get_random_idx(self, batch_size):
 
-      # Get all valid start indexes
-      valid_starts = []
-      episodes = list(self.episodes)   
+        if len(self.episodes) == 0:
+            raise ValueError("Cannot sample from an empty buffer")
 
-      for ep_idx, ep in enumerate(episodes):
-          T = ep["obs"].shape[0]
-          for start in range(T - num_steps + 1):
-              valid_starts.append((ep_idx, start))
+        # Get all valid start indexes
+        valid_starts = []
+        episodes = list(self.episodes)   
 
-      if len(valid_starts) == 0:
-          raise ValueError(f"No episode is long enough for n={num_steps}")
+        for ep_idx, ep in enumerate(episodes):
+            T = ep["obs"].shape[0]
+            if T>= 3:
+                for start_idx in range(T - 2):
+                    valid_starts.append((ep_idx, start_idx))
 
-      # sample
-      sample_idx = torch.randint(0, len(valid_starts), (batch_size,))
-      chosen = [valid_starts[i] for i in sample_idx.tolist()]
+        if len(valid_starts) == 0:
+            raise ValueError(f"No episode is long enough")
+        
+        # Sample random idx
+        sample_idx = torch.randint(0, len(valid_starts), (batch_size,))
+        start_idx = [valid_starts[i] for i in sample_idx.tolist()]
+        return start_idx
 
-      obs = []
-      actions = []
-      next_obs = []
-      rewards = []
-      terminated = []
-      truncated = []
+    def sample_batch(self, batch_size):
+        
+        # Sample start idx
+        start_idx_list = self.get_random_idx(batch_size)
 
-      for ep_idx, start in chosen:
-          ep = episodes[ep_idx]
-          end = start + num_steps
+        # Initilialize list
+        # Obs
+        start_obs_list = []
+        midpoint_obs_list = []    
 
-          obs.append(ep["obs"][start:end])                 # [num_steps, obs_dim]
-          actions.append(ep["actions"][start:end])         # [num_steps, action_dim]
-          next_obs.append(ep["next_obs"][start:end])       # [num_steps, obs_dim]
-          rewards.append(ep["rewards"][start:end])         # [num_steps, 1]
-          terminated.append(ep["terminated"][start:end])   # [num_steps, 1]
-          truncated.append(ep["truncated"][start:end])     # [num_steps, 1]
+        # Goals
+        goal_list = []
+        midpoint_goal_list = []
+        original_goal_list = []
 
-      batch = {
-          "obs": torch.stack(obs, dim=0),                 # [B, num_steps, obs_dim]
-          "actions": torch.stack(actions, dim=0),         # [B, num_steps, action_dim]
-          "next_obs": torch.stack(next_obs, dim=0),       # [B, num_steps, obs_dim]
-          "rewards": torch.stack(rewards, dim=0),         # [B, num_steps, 1]
-          "terminated": torch.stack(terminated, dim=0),   # [B, num_steps, 1]
-          "truncated": torch.stack(truncated, dim=0),     # [B, num_steps, 1]
-      }
+        offset_list = []
+        midpoint_offset_list = []
+        actions_list = []
+        midpoint_actions_list=[]
 
-      if num_steps == 1 and flat_batch: 
-          batch = {key: idx.squeeze(1) for key, idx in batch.items()}
 
-      return batch
+        for ep_idx, start in start_idx_list:
+            ep = self.episodes[ep_idx]
+            
+            # T = Length Episode
+            T = ep["obs"].shape[0]
+            
+            # Sample goal idx and midpoint idx
+            goal_idx = torch.randint(start + 1, T, ()).item()   # goal_idx in {start+1, ..., T-1}    
+            midpoint_idx = torch.randint(start, goal_idx, ()).item()    # midpoint_idx in {start, ..., goal_idx-1}
+
+            # Value offset
+            value_offset = goal_idx - start
+            value_midpoint_offset = midpoint_idx - start
+            
+            # Get new desired goal from achieved goal in endpoint 
+            goal_obs = ep["obs"][goal_idx].clone()
+            goal = self.obs_wrapper.get_achieved_goal(goal_obs)
+            
+            # Get Midpoint obs
+            midpoint_obs = ep["obs"][midpoint_idx].clone()
+            midpoint_achieved_goal = self.obs_wrapper.get_achieved_goal(midpoint_obs)        
+
+            # Relabel start goal with sampled midpoint goal
+            start_obs = ep["obs"][start].clone()
+            original_goal = self.obs_wrapper.get_achieved_goal(start_obs)      
+
+            # Get Actions of start idx and midpoint idx
+            actions_list.append(ep["actions"][start])         # [action_dim]
+            midpoint_actions_list.append(ep["actions"][midpoint_idx])   # [action_dim]
+            
+            # Append to list
+            # Obs
+            start_obs_list.append(start_obs)           # [obs_dim]
+            midpoint_obs_list.append(midpoint_obs)          # [obs_dim]
+
+            # Goals
+            goal_list.append(goal)                                  # [goal_dim]
+            midpoint_goal_list.append(midpoint_achieved_goal)       # [goal_dim]
+            original_goal_list.append(original_goal)
+
+            offset_list.append(value_offset)
+            midpoint_offset_list.append(value_midpoint_offset)
+            
+
+        batch = {
+            "start_obs": torch.stack(start_obs_list, dim=0),                                                # [B, obs_dim]
+            "midpoint_obs": torch.stack(midpoint_obs_list, dim= 0),                                         # [B, obs_dim]
+            "goal": torch.stack(goal_list, dim = 0),                                                        # [B, goal_dim]
+            "midpoint_goal":torch.stack(midpoint_goal_list, dim = 0),                                       # [B, goal_dim]
+            "original_goal":torch.stack(original_goal_list, dim = 0),                                       # [B, goal_dim]
+            "actions": torch.stack(actions_list, dim=0),                                                    # [B, action_dim]
+            "midpoint_actions": torch.stack(midpoint_actions_list, dim = 0),                                # [B, action_dim]
+            "offset": torch.tensor(offset_list, dtype=torch.long, device=self.device),                      # [B, 1]     
+            "midpoint_offset": torch.tensor(midpoint_offset_list, dtype=torch.long, device=self.device)     # [B, 1]
+        }
+
+        return batch
 
 
     def num_episodes(self):

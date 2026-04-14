@@ -34,6 +34,15 @@ class BaseArgs:
     log_dir: str = "mpo_logs"
     """directory used for logs and model checkpoints"""
 
+    
+    # ===============================
+    # TRL Parameters
+    # ===============================
+    expectile: float = 0.7
+    """expectile value for expectile weight"""
+    lambda_trl: float = 0.0
+    """lambda value for trl update distance weight"""
+
     # ===============================
     # MPO Algorithm Parameters
     # ===============================
@@ -56,7 +65,7 @@ class BaseArgs:
     "Learning rate for dual function"
     dual_constraint: float = 0.1
     """hard constraint of the dual formulation in the E-step"""
-    use_action_penalty: bool = True
+    use_action_penalty: bool = False
     """flag for using action penalty"""
     eps_penalty:float = 1e-3
     """constrain for action penalty loss term"""

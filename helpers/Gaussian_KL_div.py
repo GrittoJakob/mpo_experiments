@@ -1,40 +1,20 @@
+import torch
 
-def gaussian_kl_diag(mu_off, mu_on, std_off, std_on, use_mass_force_KL, eps: float = 1e-8):
-    """
-    mu/std: [B, A] oder allgemein [..., A]
-    Returns: (A,), (A,), scalar, scalar
-    """
+def gaussian_kl_diag(mu_1, std_1, mu_2, std_2, eps: float = 1e-8):
+
     # Clamp std for numerical safety
-    std_off = std_off.clamp_min(eps)
-    std_on  = std_on.clamp_min(eps)
+    std_1 = std_1.clamp_min(eps)
+    std_2 = std_2.clamp_min(eps)
 
 
-    reduce_dims = tuple(range(mu_on.dim() - 1))
+    reduce_dims = tuple(range(mu_1.dim() - 1))
 
-    # First option: Use normal KL divergence like in the paper: 
-    if use_mass_force_KL:
+    inv_std_2 = std_2.reciprocal()
+    d1 = (mu_1 - mu_2) * inv_std_2
+    d2 = std_1 * inv_std_2
 
-        # C_mu: 0.5 * (mu_off - mu_on)^2 / std_on^2
-        inv_std_on = std_on.reciprocal()
-        d = (mu_off - mu_on) * inv_std_on
-        C_mu = 0.5 * (d * d)
+    KL_div = torch.log(std_2/std_1) + 0.5*( d1*d1  + d2*d2 - 1)
+    KL_div_mean = KL_div.mean(dim= reduce_dims)
 
-        # C_sigma: log(std_on/std_off) + 0.5*( (std_off/std_on)^2 - 1 )
-        r = std_off * inv_std_on
-        C_sigma = (std_on.log() - std_off.log()) + 0.5 * (r * r - 1.0)
-    
-    # Second Option: Use zero-forcing KL, NOT recommended
-    else:
-        # C_mu: 0.5 * (mu_on - mu_off)^2 / std_off^2
-        inv_std_off = std_off.reciprocal()
-        d = (mu_on - mu_off) * inv_std_off
-        C_mu = 0.5 * (d * d)
 
-        # C_sigma: log(std_off/std_on) + 0.5*( (std_on/std_off)^2 - 1 )
-        r = std_on * inv_std_off
-        C_sigma = (std_off.log() - std_on.log()) + 0.5 * (r * r - 1.0)
-
-    C_mu_dim_mean    = C_mu.mean(dim=reduce_dims)       # [A]
-    C_sigma_dim_mean = C_sigma.mean(dim=reduce_dims)    # [A]
-
-    return C_mu_dim_mean, C_sigma_dim_mean, C_mu_dim_mean.sum(), C_sigma_dim_mean.sum()
+    return KL_div_mean

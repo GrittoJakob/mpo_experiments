@@ -1,10 +1,15 @@
 import torch
 import numpy as np
+try:
+    import wandb
+except ImportError:
+    wandb = None
 from runners.task_specific_evaluation_scripts.evaluation_inverted_goals import evaluate_inverted_goal
 from runners.task_specific_evaluation_scripts.evaluation_ERFI_noise import evaluate_erfi
 from runners.task_specific_evaluation_scripts.evaluation_target_goals import evaluate_target_goal
+from writer.logging import _wandb_is_active, _to_python_number
 
-def evaluate(args, actor, eval_env, writer, device, global_step):
+def evaluate(args, actor, eval_env, writer, device, grad_updates):
     """
     Run evaluation episodes using the current policy (self.actor)
     and return the average total reward per episode.
@@ -13,11 +18,11 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     rand_mode = getattr(args, "rand_mode", "default")
 
     if task_mode in ["inverted_without_task_hint"]:
-        return evaluate_inverted_goal(args, actor, eval_env, writer, device, global_step)
+        return evaluate_inverted_goal(args, actor, eval_env, writer, device, grad_updates)
     elif task_mode in ("target_goal"):
-        return evaluate_target_goal(args, actor, eval_env, writer, device, global_step)
+        return evaluate_target_goal(args, actor, eval_env, writer, device, grad_updates)
     elif rand_mode == "ERFI":
-        return evaluate_erfi(args, actor, eval_env, writer, device, global_step)
+        return evaluate_erfi(args, actor, eval_env, writer, device, grad_updates)
 
     
     with torch.no_grad():
@@ -66,7 +71,20 @@ def evaluate(args, actor, eval_env, writer, device, global_step):
     mean_episode_len = float(np.mean(episode_len))
     
     print(f"Eval Return: {mean_return:.2f}")
-    writer.add_scalar("eval/episodic_return", mean_return, global_step)
-    writer.add_scalar("eval/episodic_length", mean_episode_len, global_step)
+    metrics = {
+        "eval/episodic_return": mean_return,
+        "eval/episodic_length": mean_episode_len,
+    }
     
+    if writer is not None:
+        for key, value in metrics.items():
+            if key == "grad_updates":
+                continue
+            writer.add_scalar(key, _to_python_number(value), grad_updates)
+        writer.flush()
 
+    if _wandb_is_active():
+        wandb.log(
+            {key: _to_python_number(value) for key, value in metrics.items()},
+            step=grad_updates,
+        )

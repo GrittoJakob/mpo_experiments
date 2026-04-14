@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+import torch
 
 def make_maze_env(env_id, args, render_mode: None):
     
@@ -59,6 +60,9 @@ class GC_Obs_Wrapper(gym.ObservationWrapper):
         return obs[..., self.desired_goal_slice]
 
     def replace_desired_goal(self, obs, new_goal):
-        obs = obs.copy()
+        if isinstance(obs, torch.Tensor):
+            obs = obs.clone()
+        else:
+            obs = obs.copy()
         obs[..., self.desired_goal_slice] = new_goal
         return obs
