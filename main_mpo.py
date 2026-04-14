@@ -28,7 +28,6 @@ from writer.init_writer import init_writer
 from mpo.algorithm.__init__ import MPO
 from mpo.train_script.MPO_Learner import MPO_Learner
 from helpers.warm_up_compilation import warmup_mpo_compile
-from mpo.evaluation_e_step.MPO_Learner_for_E_step import MPO_Learner_E_Step
 
 
 ExperimentArgs = Union[

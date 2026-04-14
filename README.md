@@ -8,7 +8,7 @@ The **maze part is intentionally ignored for now**, because it is still under de
 The goal is to make it easy to run the project on a fresh machine.
 For that reason, this repository also includes:
 
-- `requirements-robust-ant.txt` – Python packages needed to run the Robust Ant experiments
+- `requirements-robust.txt` – Python packages needed to run the Robust Ant experiments
 
 ## Recommended Python Version
 

@@ -23,7 +23,7 @@ class BaseArgs:
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    log_period: int = 90
+    log_period: int = 250
     "number of global updates per log to wandb"
     video_dir: str = "videos"
     """where RecordVideo writes mp4s"""

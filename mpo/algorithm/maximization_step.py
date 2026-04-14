@@ -64,6 +64,8 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
         C_sigma_mean = C_sigma_dim.mean().detach()
         std_mean       = std_on.mean().detach()
         mu_mean        = mu_on.mean().detach()
+        eta_mu_mean    = self.eta_mu.mean().detach()
+        eta_sigma_mean = self.eta_sigma.mean().detach()
 
         stats = {
             "loss_p":        self.loss_p.detach(),
@@ -72,6 +74,8 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
             "C_sigma_mean":  C_sigma_mean,
             "std_mean":      std_mean,
             "mu_mean":       mu_mean,
+            "eta_mu":        eta_mu_mean,
+            "eta_sigma":     eta_sigma_mean,
         }
     else:
         stats = None
