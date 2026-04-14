@@ -82,6 +82,7 @@ def collect_rollout(env, state, unfinished_episodes, args, actor, replaybuffer, 
 
             state = next_states
             total_steps_collected += num_envs
+            step += num_envs
 
     actor.train()
 
