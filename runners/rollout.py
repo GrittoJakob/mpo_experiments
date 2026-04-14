@@ -17,6 +17,7 @@ def collect_rollout(env, state, unfinished_episodes, args, actor, replaybuffer, 
     num_envs = env.num_envs
     T = args.sample_steps_per_iter
     total_steps_collected = 0
+    steps_per_env = args.sample_steps_per_iter / num_envsS
     
     # For first init of unfinished episodes
     if unfinished_episodes is None:
@@ -32,7 +33,7 @@ def collect_rollout(env, state, unfinished_episodes, args, actor, replaybuffer, 
     
     with torch.no_grad():
         
-        for step in range(args.sample_steps_per_iter):
+        for step in range(steps_per_env):
         
             # Convert state from numpy to tensor for forward pass
             state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
@@ -82,7 +83,7 @@ def collect_rollout(env, state, unfinished_episodes, args, actor, replaybuffer, 
 
             state = next_states
             total_steps_collected += num_envs
-            step += num_envs
+
 
     actor.train()
 
