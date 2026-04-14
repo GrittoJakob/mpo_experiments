@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from .base_args import BaseArgs
 from typing import Optional
 
 @dataclass
