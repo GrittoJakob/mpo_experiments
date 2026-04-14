@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 @dataclass
-class Robust_Ant_Args(BaseArgs):
+class Robust_Ant_Args():
 
     # ===============================
     # General System & Environment
