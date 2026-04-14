@@ -16,24 +16,17 @@ import torch
 import tyro
 import copy
 import gymnasium as gym
-from typing import Union, Annotated
 from nets.MLP_actor import Actor
 from nets.MLP_critic import Critic
 from environment.base_env_creator import limit_threads, make_eval_env, make_train_vec_env, make_base_env
 from buffer.single_step_replaybuffer import ReplayBuffer
 from buffer.episodic_replaybuffer import EpisodicReplayBuffer
 from configs.Robust_Ant_v5 import Robust_Ant_Args
-from configs.Ant_Maze import Ant_Maze_Args
 from writer.init_writer import init_writer
 from mpo.algorithm.__init__ import MPO
 from mpo.train_script.MPO_Learner import MPO_Learner
 from helpers.warm_up_compilation import warmup_mpo_compile
 
-
-ExperimentArgs = Union[
-    Annotated[Ant_Maze_Args, tyro.conf.subcommand("ant_maze")],
-    Annotated[Robust_Ant_Args, tyro.conf.subcommand("robust_ant")],
-]
 
 def make_envs(args, run_name):
 
@@ -93,7 +86,7 @@ def make_optimizer(args, actor, critic):
     return actor_optimizer, critic_optimizer
 
 def train():
-    args = tyro.cli(ExperimentArgs)
+    args = Robust_Ant_Args
     try: 
         num_threads = int(_DEFAULT_THREADS)
     except ValueError:
@@ -152,10 +145,7 @@ def train():
 
     writer, wandbrun = init_writer(args)
 
-    if getattr(args, "use_e_step_eval", False):
-        MPO_Learner_E_Step(args, train_env, eval_env, device, replaybuffer, mpo, writer)
-    else:
-        MPO_Learner(args, train_env, eval_env, device, replaybuffer, mpo, writer)
+    MPO_Learner(args, train_env, eval_env, device, replaybuffer, mpo, writer)
 
 
 if __name__ == "__main__":

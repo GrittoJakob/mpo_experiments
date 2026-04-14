@@ -50,7 +50,7 @@ class Meta_InvertedWrapper(gym.Wrapper):
         self.backward_prob = float(prob)
 
     def reset(self, seed=None, options=None):
-        # 1) EVAL override
+        # EVAL override
         if options and 'task_mode' in options:
             self.invert = float(options['task_mode'])
         else:

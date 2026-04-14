@@ -1,13 +1,8 @@
 import torch
 import os
 import gymnasium as gym
-import gymnasium_robotics
 
-gym.register_envs(gymnasium_robotics)
-
-from .gc_wrappers.gc_obs_wrapper import make_maze_env
 from .Ant_Wrappers.helpers_ant import make_ant_env 
-
 
 """
 Env creator functions:
@@ -20,11 +15,6 @@ def make_base_env(env_id: str, args, render_mode=None):
     # Ant env has own make_base_env function for seperately setting the rewards
     if "ant" in env_id.lower():
         env = make_ant_env(env_id, args, render_mode)
-        return env
-
-    # Wrap observation if env is goal-conditioned/maze_env
-    if "maze" in env_id.lower():
-        env = make_maze_env(env_id, args, render_mode)
         return env
     
     # For creating any other environment

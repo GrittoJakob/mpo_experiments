@@ -48,6 +48,7 @@ class RFIActionWrapper(gym.ActionWrapper):
 # ==============================================================================
 # 2. RAO Wrapper (Episodic Bias) 
 # ==============================================================================
+
 class RAOActionWrapper(gym.ActionWrapper):
     def __init__(self, env: gym.Env, noise_limit: float = 0.05):
         super().__init__(env)
@@ -60,14 +61,13 @@ class RAOActionWrapper(gym.ActionWrapper):
         self.current_limit = float(new_limit)
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
-        # 1. Check for overrides in options
+        # Check for overrides in options
         if options and "rao_limit" in options:
             self.current_limit = float(options["rao_limit"])
         else:
             self.current_limit = self.default_limit
         
-        # 2. Sample Bias using the (potentially new) limit
-        # Note: We must call super().reset() to ensure seeds are set if needed
+        # Sample Bias using the (potentially new) limit
         obs, info = super().reset(seed=seed, options=options)
         
         if self.current_limit > 0.0:

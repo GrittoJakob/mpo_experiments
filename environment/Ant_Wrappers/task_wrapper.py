@@ -116,9 +116,8 @@ class GoalPositionWrapper(gym.Wrapper):
 
         pos_rew = self.pos_scale * progress
 
-        # --- Success bonus / termination (optional) ---
+        # Success bonus / termination
         reached = dist_now < self.success_radius
-        # Wenn du willst:
         if reached:
             pos_rew += 10.0
 
