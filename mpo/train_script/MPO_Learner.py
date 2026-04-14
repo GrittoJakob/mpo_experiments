@@ -154,7 +154,7 @@ def MPO_Learner(
 
             # Evaluate current policy without gradient tracking
             mpo.actor.eval()
-            evaluate(args, mpo.actor, eval_env, writer, device, num_steps)
+            evaluate(args, mpo.actor, eval_env, writer, device, grad_updates)
             mpo.actor.train()
 
         # Update iteration counter

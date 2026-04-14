@@ -104,11 +104,11 @@ class BaseArgs:
     
     # Train Loop    
 
-    warm_up_steps: int = 5000
+    warm_up_steps: int = 15000
     """number of warm-up steps for the buffer"""
     delay_policy_update: int = 2
     """number of critic updates per policy update"""
-    sample_steps_per_iter: int = 1600
+    sample_steps_per_iter: int = 4000
     """number of env steps per rollout in every iteration"""
 
 
