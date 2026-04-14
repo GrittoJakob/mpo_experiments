@@ -27,7 +27,12 @@ def maximization_step(self, state_batch, norm_target_q, sampled_actions, mu_off,
     self.loss_p = -(weighted_logp).sum() / B       # sum over N -> (B,), mean over B -> scalar
 
     # KL constraints between old and new Gaussian policies, options to use KL mass forcing KL divergence or zero forcing
-    C_mu_dim, C_sigma_dim, _, _ = gaussian_kl_diag(mu_off, mu_on, std_off, std_on, self.use_mass_force_KL)
+    if self.use_mass_force_KL:
+        C_mu_dim = gaussian_kl_diag(mu_off, std_off, mu_on, std_off)
+        C_sigma_dim = gaussian_kl_diag(mu_off, std_off, mu_off, std_on)
+    else:
+        C_mu_dim = gaussian_kl_diag(mu_on, std_off, mu_off, std_off)
+        C_sigma_dim = gaussian_kl_diag(mu_off, std_on, mu_off, std_off)
 
     with torch.no_grad():
 

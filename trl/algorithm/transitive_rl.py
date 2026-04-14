@@ -81,14 +81,14 @@ def trl_critic_loss(self, batch, collect_stats = None):
 
     self.critic_optimizer.zero_grad(set_to_none=True)
        
-    critic_loss = expectile_weight * dist_weight * F.binary_cross_entropy_with_logits(
+    critic_loss = expectile_weight * dist_weight * F.binary_cross_entropy(
         critic, target_critic, reduction="none"
     )
     loss = critic_loss.mean()
     loss.backward()
     self.critic_optimizer.step()
 
-    if collect_stats is not None:
+    if collect_stats:
         stats = {
             "critic_loss": loss.detach().mean(),
             "q_current_mean": critic.detach().mean(),
