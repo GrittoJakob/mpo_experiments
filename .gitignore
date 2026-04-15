@@ -14,3 +14,4 @@ torch_compile_debug/
 mpo_python3_10
 .venv/
 checkpoints/
+profile.prof

@@ -17,7 +17,7 @@ def collect_rollout(env, state, unfinished_episodes, args, actor, replaybuffer, 
     num_envs = env.num_envs
     T = args.sample_steps_per_iter
     total_steps_collected = 0
-    steps_per_env = args.sample_steps_per_iter / num_envsS
+    steps_per_env = args.sample_steps_per_iter / num_envs
     
     # For first init of unfinished episodes
     if unfinished_episodes is None:

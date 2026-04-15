@@ -22,7 +22,7 @@ class Robust_Ant_Args():
     """the wandb's project name"""
     wandb_entity: Optional[str] = "jakobs_experiments"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     log_period: int = 250
     "number of global updates per log to wandb"
@@ -47,9 +47,9 @@ class Robust_Ant_Args():
 
 
     # Actor & Critic
-    hidden_size_actor: int = 256
+    hidden_size_actor: int = 128
     """hidden size of actor network"""
-    hidden_size_critic: int = 256
+    hidden_size_critic: int = 128
     """hidden size of critc network"""
     actor_lr: float = 3e-4
     """Learning rate for actor Adam optimizer"""
@@ -113,9 +113,9 @@ class Robust_Ant_Args():
     # Train Loop
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_training_steps: int = 2000000
+    max_training_steps: int = 20000
     """Maximal number of env steps for training"""
-    warm_up_steps: int = 15000
+    warm_up_steps: int = 5000
     """number of warm-up steps for the buffer"""
     delay_policy_update: int = 2
     """number of critic updates per policy update"""
@@ -123,20 +123,18 @@ class Robust_Ant_Args():
     """number of env steps per rollout in every iteration"""
    
     # Sampling / Replay Buffer
-    batch_size: int = 512
+    batch_size: int = 128
     """batch size used when sampling from replay buffer"""
     max_buffer_capacity: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
     episodic_replaybuffer: bool = False
     """flag for using an episodic replaybuffer for sequential storage of env steps"""
 
-
-
     # ===============================
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 5
+    evaluate_period: int = 2
     """evaluate the agent every N iterations"""
     evaluate_episode_num: int = 5
     """how many evaluation episodes to run"""
