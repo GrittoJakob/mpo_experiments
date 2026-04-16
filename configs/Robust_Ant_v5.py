@@ -184,6 +184,9 @@ class Robust_Ant_Args():
     """
     include_cfrc_ext_in_observation: bool = False
     """Whether to include external contact force terms in the observation."""
+    history_len: int = 5
+    """lenght of sequence of actions and rewards which are 
+    stacked in obs for inverted_without_task_hint"""
 
     # ============================
     # Velocity task reward shaping
@@ -194,6 +197,8 @@ class Robust_Ant_Args():
     """Penalty/reduction scaling when moving in the wrong direction."""
     vel_rew_max_speed: float = 4.0
     """Maximum speed considered in the velocity reward."""
+    append_task_reward: bool = False
+    """whether to use the task specific reward as observation in inverted_without_task_hint or total reward"""
 
     # ==========================
     # Target / position task
@@ -233,15 +238,3 @@ class Robust_Ant_Args():
     noise_limit: float = 0.1
     """Noise limit for RFI and RAO randomization."""
 
-
-    # =========================================
-    # E-Step Evaluation Distribution Parameters
-    # ========================================= 
-    eval_e_step: int = 3
-    """how often to evaluate E-step distribution"""
-    use_e_step_eval: bool = False
-    """Flag for using new MPO_Learner for E-step evaluation"""
-    sample_action_num_for_dist_eval: int = 32
-    """how many samples for e-step evaluation"""
-    m_step_eval_iterations: int = 4
-    """number of iterations in the evaluation of the M-Step to show the fitting of the online actor to the auxiliar distribution"""

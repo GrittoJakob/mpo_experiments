@@ -1,13 +1,9 @@
 import torch
 import numpy as np
-try:
-    import wandb
-except ImportError:
-    wandb = None
 from runners.task_specific_evaluation_scripts.evaluation_inverted_goals import evaluate_inverted_goal
 from runners.task_specific_evaluation_scripts.evaluation_ERFI_noise import evaluate_erfi
 from runners.task_specific_evaluation_scripts.evaluation_target_goals import evaluate_target_goal
-from writer.logging import _wandb_is_active, _to_python_number
+from writer.logging import logging
 
 def evaluate(args, actor, eval_env, writer, device, grad_updates):
     """
@@ -75,16 +71,6 @@ def evaluate(args, actor, eval_env, writer, device, grad_updates):
         "eval/episodic_return": mean_return,
         "eval/episodic_length": mean_episode_len,
     }
-    
-    if writer is not None:
-        for key, value in metrics.items():
-            if key == "grad_updates":
-                continue
-            writer.add_scalar(key, _to_python_number(value), grad_updates)
-        writer.flush()
 
-    if _wandb_is_active():
-        wandb.log(
-            {key: _to_python_number(value) for key, value in metrics.items()},
-            step=grad_updates,
-        )
+    logging(metrics, grad_updates, writer)
+    

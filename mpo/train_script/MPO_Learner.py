@@ -7,7 +7,7 @@ from mpo.algorithm.__init__ import MPO
 from runners.rollout import collect_rollout
 from runners.video_rollout import log_one_episode_video
 from runners.evaluation import evaluate
-from writer.logging import logging_wandb
+from writer.logging import logging
 from helpers.save_model import save_actor_critic
 
 
@@ -36,15 +36,18 @@ def MPO_Learner(
     # Iterators
     it = 0
     grad_updates = 0 
+
+     # Main training iterations
+    pbar = tqdm(total=args.max_training_steps, desc="Env steps")
     
     # Warm-up: fill replay buffer with some initial experience
     while len(replaybuffer) < args.warm_up_steps:
         state, unfinished_episodes, new_steps = collect_rollout(train_env, state, unfinished_episodes, args, mpo.actor, replaybuffer, device)
         num_steps += new_steps
 
+    # For terminal logging
+    pbar.update(new_steps)
     
-    # Main training iterations
-    pbar = tqdm(total=args.max_training_steps, desc="Env steps")
     while num_steps < args.max_training_steps:
 
         # Collect fresh experience for this iteration
@@ -53,13 +56,13 @@ def MPO_Learner(
         #Update current steps for while loop
         num_steps += new_steps
 
+        # For terminal logging
+        pbar.update(new_steps)
+
         # Capture Video        
         if args.capture_video and it % args.log_videos_period == 0:
             prefix = f"rollout_gu{grad_updates}"
             log_one_episode_video(args, mpo.actor, device, prefix, grad_updates)
-
-        # For terminal logging
-        pbar.update(new_steps)
 
         # Number of updates dependant from UTD ratio and collected steps during rollout
         num_updates_per_iter = math.ceil(
@@ -132,15 +135,32 @@ def MPO_Learner(
 
             # logging to wandb
             if args.wandb_track and (i_update % args.log_period == 0) and collect_stats:
-                logging_wandb(
-                    writer = writer,
-                    replaybuffer = replaybuffer, 
-                    stats_m_step = stats_m_step,
-                    stats_e_step = stats_e_step,
-                    critic_update_stats = critic_update_stats,
-                    grad_updates = grad_updates, 
-                    num_steps = num_steps
-                )
+                
+                # Compute mean reward/return in replay buffer
+                mean_reward_buffer = replaybuffer.mean_reward()
+
+                # Define metrics
+                metrics = {
+                    "grad_updates": grad_updates,
+                    "buffer/size": len(replaybuffer),
+                    "buffer/mean_reward_per_step": mean_reward_buffer,
+                    "buffer/total_num_steps": num_steps,
+                    "m-step/loss_p": stats_m_step["loss_p"],
+                    "m-step/loss_l": stats_m_step["loss_l"],
+                    "m-step/C_mu_mean": stats_m_step["C_mu_mean"],
+                    "m-step/C_sigma_mean": stats_m_step["C_sigma_mean"],
+                    "m-step/mu_mean": stats_m_step["mu_mean"],
+                    "m-step/std_mean": stats_m_step["std_mean"],
+                    "m-step/eta_mu": stats_m_step["eta_mu"],
+                    "m-step/eta_sigma": stats_m_step["eta_sigma"],
+                    "e-step/eta_dual": stats_e_step["eta_dual"],
+                    "e-step/loss_dual": stats_e_step["loss_dual"],
+                    "critic_update/q_loss": critic_update_stats["critic_loss"],
+                    "critic_update/q_current_mean": critic_update_stats["q_current_mean"],
+                    "critic_update/q_target_mean": critic_update_stats["q_target_mean"],
+                }
+
+                logging(metrics, grad_updates, writer)
 
              
             # Target network update & logging
