@@ -113,9 +113,9 @@ class Robust_Ant_Args():
     # Train Loop
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_training_steps: int = 20000
+    max_training_steps: int = öt1000000
     """Maximal number of env steps for training"""
-    warm_up_steps: int = 5000
+    warm_up_steps: int = 15000
     """number of warm-up steps for the buffer"""
     delay_policy_update: int = 2
     """number of critic updates per policy update"""
@@ -123,7 +123,7 @@ class Robust_Ant_Args():
     """number of env steps per rollout in every iteration"""
    
     # Sampling / Replay Buffer
-    batch_size: int = 128
+    batch_size: int = 256
     """batch size used when sampling from replay buffer"""
     max_buffer_capacity: int = 800000
     """maximum number of transitions stored; FIFO removes oldest episodes when exceeded"""
@@ -134,7 +134,7 @@ class Robust_Ant_Args():
     # Evaluation Parameters
     # ===============================
 
-    evaluate_period: int = 2
+    evaluate_period: int = 5
     """evaluate the agent every N iterations"""
     evaluate_episode_num: int = 5
     """how many evaluation episodes to run"""
