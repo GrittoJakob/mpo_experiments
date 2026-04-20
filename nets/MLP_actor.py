@@ -29,7 +29,7 @@ class Actor(nn.Module):
             nn.ELU(),
         )
 
-        # zwei getrennte Köpfe
+        # Two seperated actor heads for mean and std
         self.mean_layer = nn.Linear(self.hidden_size, self.dim_action)
         if self.use_tanh_on_mean:
             self.activation_layer_mean = nn.Tanh()
