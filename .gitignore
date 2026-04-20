@@ -17,3 +17,4 @@ checkpoints/
 execution_tests.py
 tea_debug.log
 profile.prof
+checkpoints/
