@@ -113,7 +113,7 @@ class Robust_Ant_Args():
     # Train Loop
     UTD_ratio: float = 0.5
     """ Ratio: num_updates per env step"""
-    max_training_steps: int = öt1000000
+    max_training_steps: int = 1000000
     """Maximal number of env steps for training"""
     warm_up_steps: int = 15000
     """number of warm-up steps for the buffer"""
