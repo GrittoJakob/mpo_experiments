@@ -33,7 +33,7 @@ def expectation_step(self, target_q, sampled_actions, collect_stats: bool=False)
             "eta_dual": self.eta_dual.detach(),
             "loss_dual": loss_dual.detach(),
         }
-    # Action Penalty from Google Deepminds Implementation of Multio-objective MPO
+    # Action Penalty from Google Deepminds Implementation of Multi-objective MPO
     if self.use_action_penalty:
         # Compute quadratic curve when out of bound:
         actions_squashed  = torch.max(torch.min(sampled_actions, self.action_space_high), self.action_space_low)
