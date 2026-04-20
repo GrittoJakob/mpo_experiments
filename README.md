@@ -1,7 +1,6 @@
 # MPO Experiments – Robust Ant Quickstart
 
-This README explains **only** how to start the **Robust Ant experiments**.
-The **maze part is intentionally ignored for now**, because it is still under development.
+This README explains how to start the **Robust Ant experiments**.
 
 ## Goal
 
@@ -21,15 +20,14 @@ So the safest choice is to use **Python 3.10**, especially to avoid friction wit
 Then move into the project directory:
 
 ```bash
-cd mpo_experiments-mpo_multitask
+cd mpo_experiments
 ```
 
-### 2) Create a virtual environment
+### 2) Create a virtual environment using conda
 
 ```bash
-python3.10 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
+conda create -n mpo_env python=3.10
+conda activate mpo_env
 ```
 
 ### 3) Install Python packages
@@ -61,18 +59,18 @@ Important: run the script **from the project root**, meaning the directory that 
 ### Default Robust Ant run
 
 ```bash
-python main_mpo.py robust_ant
+python main_mpo.py
 ```
 
 This is the main entry point.
-`main_mpo.py` uses Tyro subcommands, and `robust_ant` is the relevant subcommand for the Ant experiments.
+`main_mpo.py` uses Tyro subcommands
 
 ## Recommended first smoke test
 
 For a quick first test on a new machine, start with a small run:
 
 ```bash
-WANDB_MODE=offline python main_mpo.py robust_ant \
+WANDB_MODE=offline python main_mpo.py \
   --device cpu \
   --num-envs 1 \
   --max-training-steps 10000 \
@@ -94,7 +92,7 @@ Why this setup?
 If CUDA is available and working:
 
 ```bash
-WANDB_MODE=offline python main_mpo.py robust_ant \
+WANDB_MODE=offline python main_mpo.py\
   --device cuda \
   --num-envs 4
 ```
@@ -104,20 +102,20 @@ WANDB_MODE=offline python main_mpo.py robust_ant \
 ### Inverted task without task hint
 
 ```bash
-python main_mpo.py robust_ant --task-mode inverted_without_task_hint
+python main_mpo.py --task-mode inverted_without_task_hint
 ```
 
 ### Target-goal task
 
 ```bash
-python main_mpo.py robust_ant --task-mode target_goal
+python main_mpo.py --task-mode target_goal
 ```
 
 ### Domain randomization / robustness modes
 
 ```bash
-python main_mpo.py robust_ant --rand-mode RFI
-python main_mpo.py robust_ant --rand-mode RAO
+python main_mpo.py --rand-mode RFI
+python main_mpo.py --rand-mode RAO
 ```
 
 ## Important directories
@@ -162,27 +160,5 @@ If video logging causes problems, start with `--no-capture-video`.
 The command should be run from the root of the repository:
 
 ```bash
-python main_mpo.py robust_ant
+python main_mpo.py
 ```
-
-## Minimal quickstart checklist
-
-If you just want the fastest possible way to start:
-
-```bash
-python3.10 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -r requirements-robust-ant.txt
-WANDB_MODE=offline python main_mpo.py robust_ant --device cpu --num-envs 1 --max-training-steps 10000 --sample-steps-per-iter 256 --warm-up-steps 1000 --no-capture-video
-```
-
-## What this README intentionally does not cover
-
-- Ant Maze
-- benchmark comparisons
-- hyperparameter tuning
-- cluster/Slurm setup
-- evaluation of old checkpoints
-
-This README is intentionally written as a **quickstart for Robust Ant only**.
