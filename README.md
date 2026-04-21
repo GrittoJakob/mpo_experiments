@@ -2,6 +2,7 @@
 
 This repository contains the current MPO experiment setup.
 The README is intentionally minimal and only covers what is needed to get the project running.
+For more information on implementation details and results, please see here: https://grittojakob.github.io/jakobs_experiments_blog/
 
 ## Requirements
 
