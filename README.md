@@ -33,7 +33,7 @@ conda activate mpo_env
 ### 3) Install Python packages
 
 ```bash
-pip install -r requirements-robust-ant.txt
+pip install -r requirements.txt
 ```
 
 ## Optional system packages (Linux)
