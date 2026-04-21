@@ -1,36 +1,32 @@
-# MPO Experiments – Robust Ant Quickstart
+# MPO Experiments – Quickstart
 
-This README explains how to start the **Robust Ant experiments**.
+This repository contains the current MPO experiment setup.
+The README is intentionally minimal and only covers what is needed to get the project running.
 
-## Goal
+## Requirements
 
-The goal is to make it easy to run the project on a fresh machine.
-For that reason, this repository also includes:
+Recommended:
+- Python 3.10
+- Linux machine
+- optional: CUDA-capable GPU
 
-- `requirements-robust.txt` – Python packages needed to run the Robust Ant experiments
+## Setup
 
-## Recommended Python Version
-
-So the safest choice is to use **Python 3.10**, especially to avoid friction with MuJoCo, Gymnasium, and the existing code.
-
-## Quick Setup on a New Machine
-
-### 1) Clone or unpack the repository
-
-Then move into the project directory:
+Clone the repository and enter the project root:
 
 ```bash
-cd mpo_experiments
+git clone <repo-url>
+cd mpo_experiments-main
 ```
 
-### 2) Create a virtual environment using conda
+Create and activate a conda environment:
 
 ```bash
 conda create -n mpo_env python=3.10
 conda activate mpo_env
 ```
 
-### 3) Install Python packages
+Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -38,36 +34,26 @@ pip install -r requirements.txt
 
 ## Optional system packages (Linux)
 
-Depending on the machine, you may need additional system packages for MuJoCo rendering or video recording.
-Typical Ubuntu/Debian packages are:
+If MuJoCo rendering or video logging causes issues, install:
 
 ```bash
 sudo apt update
 sudo apt install -y ffmpeg libgl1 libosmesa6 libglfw3
 ```
 
-Notes:
+## Run training
 
-- `ffmpeg` is useful for video logging.
-- If you start **without video**, you often do not need this immediately.
-- MuJoCo is used through the Python package `mujoco`, and Gymnasium's MuJoCo environments rely on it.
+Always run commands from the project root (the directory containing `main_mpo.py`).
 
-## Start training
-
-Important: run the script **from the project root**, meaning the directory that contains `main_mpo.py`.
-
-### Default Robust Ant run
+Default run:
 
 ```bash
 python main_mpo.py
 ```
 
-This is the main entry point.
-`main_mpo.py` uses Tyro subcommands
+## Recommended smoke test
 
-## Recommended first smoke test
-
-For a quick first test on a new machine, start with a small run:
+For a quick first check on a new machine:
 
 ```bash
 WANDB_MODE=offline python main_mpo.py \
@@ -79,86 +65,38 @@ WANDB_MODE=offline python main_mpo.py \
   --no-capture-video
 ```
 
-Why this setup?
+This keeps the setup simple:
+- CPU only
+- one environment
+- no online W\&B dependency
+- no video requirement
 
-- `WANDB_MODE=offline` keeps Weights & Biases local and avoids login/network issues.
-- `--device cpu` is usually the most robust first test on a fresh machine.
-- `--num-envs 1` reduces complexity.
-- `--no-capture-video` avoids extra rendering/video dependencies on the first run.
-- `--max-training-steps 10000` is only meant as a smoke test, not as a real training run.
+## GPU run
 
-## Typical GPU run
-
-If CUDA is available and working:
+If CUDA is available:
 
 ```bash
-WANDB_MODE=offline python main_mpo.py\
+WANDB_MODE=offline python main_mpo.py \
   --device cuda \
   --num-envs 4
 ```
 
-## Useful variants
+## Outputs
 
-### Inverted task without task hint
-
-```bash
-python main_mpo.py --task-mode inverted_without_task_hint
-```
-
-### Target-goal task
-
-```bash
-python main_mpo.py --task-mode target_goal
-```
-
-### Domain randomization / robustness modes
-
-```bash
-python main_mpo.py --rand-mode RFI
-python main_mpo.py --rand-mode RAO
-```
-
-## Important directories
-
-After starting a run, these folders are relevant:
-
+Relevant directories created during training:
 - `checkpoints/` – saved models
 - `runs/` – TensorBoard logs
 - `videos/` – recorded episodes
 - `mpo_logs/` – additional logs
 
-## View TensorBoard
+## TensorBoard
 
 ```bash
 tensorboard --logdir runs
 ```
 
-Then open the local URL shown in the terminal.
+## Notes
 
-## Common issues
-
-### 1) Python version
-
-Use **Python 3.10** whenever possible.
-Newer Python versions can make RL and MuJoCo setups unnecessarily fragile.
-
-### 2) MuJoCo / Gymnasium
-
-`Ant-v5` is a Gymnasium MuJoCo environment, so MuJoCo support must be installed correctly.
-
-### 3) W&B
-
-The current code directly calls `wandb.init(...)`.
-On a fresh machine, `WANDB_MODE=offline` is usually the easiest option.
-
-### 4) Video / rendering
-
-If video logging causes problems, start with `--no-capture-video`.
-
-### 5) Always start from the project root
-
-The command should be run from the root of the repository:
-
-```bash
-python main_mpo.py
-```
+- Use Python 3.10 if possible.
+- If W\&B causes issues, use `WANDB_MODE=offline`.
+- If rendering/video causes issues, use `--no-capture-video`.
